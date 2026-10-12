@@ -1,20 +1,29 @@
-import { Vector3 } from 'three'
+import { Vector3, Scene } from 'three'
 import { PointerLockControls } from 'three/examples/jsm/controls/PointerLockControls.js'
+import type Game from './Game'
+import type Renderer from './Renderer'
+import type Player from './Player'
 
 export default class PlayerController {
-    constructor(game) {
+    public game: Game
+    public renderer: Renderer
+    public scene: Scene
+    public player: Player
+    public controls: PointerLockControls
+
+    public walkingSpeed = 2.5
+    public sprintingSpeed = 6.0
+    public verticalSpeed = 2.0
+
+    public keys: Record<string, boolean> = {}
+
+    constructor(game: Game) {
         this.game = game
         this.renderer = this.game.renderer
         this.scene = this.game.scene
         this.player = this.game.player
 
         this.controls = new PointerLockControls(this.game.camera, document.body)
-
-        this.walkingSpeed = 2.5
-        this.sprintingSpeed = 6.0
-        this.verticalSpeed = 2.0
-
-        this.keys = {}
 
         this.resetPosition()
         this.initControls()
@@ -24,15 +33,15 @@ export default class PlayerController {
         window.addEventListener('resize', () => this.updateSize())
     }
 
-    resetPosition() {
+    public resetPosition(): void {
         this.game.camera.position.set(0, 80, 240)
         this.game.camera.lookAt(new Vector3(0, 0, 0))
     }
 
-    initControls() {
-        document.body.addEventListener('click', e => {
-            // Prevent locking if clicking on popup buttons or when game is finished
-            if (e.target && e.target.closest('#popup')) return
+    private initControls(): void {
+        document.body.addEventListener('click', (e: MouseEvent) => {
+            const target = e.target as HTMLElement | null
+            if (target && target.closest('#popup')) return
             if (this.game.board && this.game.board.blockActions) return
 
             if (!this.controls.isLocked) {
@@ -40,13 +49,12 @@ export default class PlayerController {
             }
         })
 
-        // Prevent right click context menu everywhere
-        window.addEventListener('contextmenu', e => {
+        window.addEventListener('contextmenu', (e: MouseEvent) => {
             e.preventDefault()
         })
     }
 
-    update(delta) {
+    public update(delta: number): void {
         if (!this.controls.isLocked) return
 
         const speed = (this.keys["ShiftLeft"] || this.keys["ShiftRight"])
@@ -66,7 +74,6 @@ export default class PlayerController {
             this.controls.moveRight(speed)
         }
 
-        // Vertical movement / elevation
         if (this.keys["Space"] || this.keys["KeyE"]) {
             this.game.camera.position.y = Math.min(500, this.game.camera.position.y + this.verticalSpeed)
         }
@@ -77,8 +84,8 @@ export default class PlayerController {
         this.player.update(delta)
     }
 
-    addKeyListeners() {
-        document.addEventListener("keydown", e => {
+    private addKeyListeners(): void {
+        document.addEventListener("keydown", (e: KeyboardEvent) => {
             this.keys[e.code] = true
 
             if (e.code === "KeyR") {
@@ -86,19 +93,17 @@ export default class PlayerController {
             }
         })
 
-        document.addEventListener("keyup", e => {
+        document.addEventListener("keyup", (e: KeyboardEvent) => {
             this.keys[e.code] = false
         })
 
-        document.addEventListener("mousedown", e => {
+        document.addEventListener("mousedown", (e: MouseEvent) => {
             if (this.controls.isLocked && !this.game.board.blockActions) {
-                // LMB - Reveal
                 if (e.button === 0) {
                     if (this.player.tileLookedAt) {
                         this.player.tileLookedAt.open()
                     }
                 }
-                // RMB - Toggle Flag
                 if (e.button === 2) {
                     if (this.player.tileLookedAt) {
                         this.player.tileLookedAt.toggleFlag()
@@ -108,7 +113,7 @@ export default class PlayerController {
         })
     }
 
-    updateSize() {
+    public updateSize(): void {
         if (!this.renderer || !this.renderer.domElement) return
         this.game.camera.aspect = window.innerWidth / window.innerHeight
         this.game.camera.updateProjectionMatrix()

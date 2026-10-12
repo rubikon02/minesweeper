@@ -1,21 +1,30 @@
+import { Object3D } from 'three'
 import Tile from './Tile'
 import Flag from './Flag'
+import type Game from '../Game'
 
 export default class Board {
-    constructor(game) {
+    public game: Game
+    public width: number
+    public height: number
+    public tileSize: number
+    public bombsDensity: number
+    public bombsCount: number
+
+    public tiles: Tile[] = []
+    public grid: (Tile | null)[][] = []
+    public bombs: { x: number; z: number }[] = []
+    public bombsGenerated = false
+    public blockActions = false
+    public preloadedFlag: Object3D | null = null
+
+    constructor(game: Game) {
         this.game = game
         this.width = 20
         this.height = 20
         this.tileSize = 35
         this.bombsDensity = 0.13
         this.bombsCount = Math.floor(this.width * this.height * this.bombsDensity)
-
-        this.tiles = []
-        this.grid = []
-        this.bombs = []
-        this.bombsGenerated = false
-        this.blockActions = false
-        this.preloadedFlag = null
 
         Flag.preload(this.game.manager, flag => {
             this.preloadedFlag = flag
@@ -24,7 +33,7 @@ export default class Board {
         this.generateTiles()
     }
 
-    generateTiles() {
+    public generateTiles(): void {
         this.grid = []
         for (let x = 0; x < this.width; x++) {
             this.grid[x] = []
@@ -37,11 +46,11 @@ export default class Board {
         }
     }
 
-    generateBombs(safeX, safeZ) {
+    public generateBombs(safeX: number, safeZ: number): void {
         this.bombs = []
         this.bombsCount = Math.floor(this.width * this.height * this.bombsDensity)
 
-        const isSafe = (x, z) => {
+        const isSafe = (x: number, z: number): boolean => {
             return Math.abs(x - safeX) <= 1 && Math.abs(z - safeZ) <= 1
         }
 
@@ -58,18 +67,18 @@ export default class Board {
         this.bombsGenerated = true
     }
 
-    setTileValues() {
-        for (let bomb of this.bombs) {
+    public setTileValues(): void {
+        for (const bomb of this.bombs) {
             const tile = this.getTile(bomb.x, bomb.z)
             if (tile) {
                 tile.set("bomb")
             }
         }
 
-        for (let tile of this.tiles) {
+        for (const tile of this.tiles) {
             if (tile.value !== "bomb") {
                 let neighbourBombs = 0
-                for (let neighbour of tile.getNeighbours()) {
+                for (const neighbour of tile.getNeighbours()) {
                     if (neighbour.value === "bomb") {
                         neighbourBombs++
                     }
@@ -83,19 +92,17 @@ export default class Board {
         }
     }
 
-    getTile(x, z) {
+    public getTile(x: number, z: number): Tile | null {
         if (x < 0 || x >= this.width || z < 0 || z >= this.height) {
             return null
         }
         return this.grid[x] ? this.grid[x][z] : null
     }
 
-    revealAllBombs() {
-        for (let tile of this.tiles) {
+    public revealAllBombs(): void {
+        for (const tile of this.tiles) {
             if (tile.value === "bomb" && !tile.isOpen()) {
-                if (tile.flag.isVisible()) {
-                    // Flagged bomb was correctly identified
-                } else {
+                if (!tile.flag.isVisible()) {
                     this.game.scene.remove(tile.mesh)
                     tile.mesh = tile.flatMesh
                     this.game.scene.add(tile.mesh)
@@ -104,18 +111,18 @@ export default class Board {
         }
     }
 
-    flagAllBombs() {
-        for (let tile of this.tiles) {
+    public flagAllBombs(): void {
+        for (const tile of this.tiles) {
             if (tile.value === "bomb" && !tile.flag.isVisible()) {
                 tile.flag.show(true)
             }
         }
     }
 
-    checkWin() {
+    public checkWin(): boolean {
         if (!this.bombsGenerated) return false
 
-        for (let tile of this.tiles) {
+        for (const tile of this.tiles) {
             if (tile.value !== "bomb" && !tile.isOpen()) {
                 return false
             }
@@ -123,24 +130,24 @@ export default class Board {
         return true
     }
 
-    restart() {
+    public restart(): void {
         this.blockActions = false
         this.bombsGenerated = false
         this.bombs = []
 
-        for (let tile of this.tiles) {
+        for (const tile of this.tiles) {
             tile.close()
         }
     }
 
-    removeFlags() {
-        for (let tile of this.tiles) {
+    public removeFlags(): void {
+        for (const tile of this.tiles) {
             tile.flag.hide(true)
         }
     }
 
-    closeAll() {
-        for (let tile of this.tiles) {
+    public closeAll(): void {
+        for (const tile of this.tiles) {
             tile.close()
         }
     }

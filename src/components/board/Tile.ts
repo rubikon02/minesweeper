@@ -9,17 +9,44 @@ import {
     LinearMipMapLinearFilter,
     PlaneGeometry,
     DoubleSide,
-    Mesh
+    Mesh,
+    Texture
 } from 'three'
 
 import Flag from './Flag'
 import tileTexture from '../../assets/tiles.png'
+import type Board from './Board'
+import type Game from '../Game'
 
-// Cached unopened texture for convex top
-let sharedTopTexture = null
+export interface TileMesh extends Mesh {
+    parentObject?: Tile
+}
+
+let sharedTopTexture: Texture | null = null
 
 export default class Tile {
-    constructor(board, x, z) {
+    public board: Board
+    public x: number
+    public z: number
+    public game: Game
+    public height: number
+    public scale: number
+    public value: string | number
+    public flag: Flag
+    public size: Vector3
+
+    public mesh!: TileMesh
+    public convexMesh!: TileMesh
+    public flatMesh!: TileMesh
+
+    public topMaterial!: MeshPhongMaterial
+    public sideMaterial!: MeshPhongMaterial
+    public texture!: Texture
+
+    private angle = Math.PI / 3
+    private slope = 1 - 0.4 / Math.tan(Math.PI / 3)
+
+    constructor(board: Board, x: number, z: number) {
         this.board = board
         this.x = x
         this.z = z
@@ -37,7 +64,6 @@ export default class Tile {
         this.size = new Vector3()
         new Box3().setFromObject(this.mesh).getSize(this.size)
 
-        // Set position for both meshes
         const posX = board.tileSize * this.x - board.width * board.tileSize / 2 + board.tileSize / 2
         const posZ = board.tileSize * this.z - board.height * board.tileSize / 2 + board.tileSize / 2
 
@@ -47,10 +73,7 @@ export default class Tile {
         this.flag = new Flag(this)
     }
 
-    createConvexMesh() {
-        this.angle = Math.PI / 3 // 60 deg
-        this.slope = 1 - this.height / Math.tan(this.angle)
-
+    private createConvexMesh(): void {
         let convexVertices = new Float32Array([
             // left
             -1, 0, -1,
@@ -99,7 +122,7 @@ export default class Tile {
         ])
         convexVertices = convexVertices.map(el => el * this.scale / 2)
 
-        let convexUvs = new Float32Array([
+        const convexUvs = new Float32Array([
             // left
             1, 0,
             0, 0,
@@ -173,16 +196,11 @@ export default class Tile {
             emissive: 0x000000,
         })
 
-        const convexMaterials = [
-            this.sideMaterial,
-            this.topMaterial
-        ]
-
-        this.convexMesh = new Mesh(convexGeometry, convexMaterials)
+        this.convexMesh = new Mesh(convexGeometry, [this.sideMaterial, this.topMaterial]) as TileMesh
         this.convexMesh.parentObject = this
     }
 
-    createFlatMesh() {
+    private createFlatMesh(): void {
         this.texture = new TextureLoader().load(tileTexture)
         this.texture.magFilter = NearestFilter
         this.texture.minFilter = LinearMipMapLinearFilter
@@ -198,20 +216,20 @@ export default class Tile {
             map: this.texture,
         })
 
-        this.flatMesh = new Mesh(geometry, material)
+        this.flatMesh = new Mesh(geometry, material) as TileMesh
         this.flatMesh.rotation.x = Math.PI * 3 / 2
         this.flatMesh.parentObject = this
     }
 
-    setHover(hovered) {
+    public setHover(hovered: boolean): void {
         if (!this.isOpen() && this.topMaterial) {
             this.topMaterial.emissive.setHex(hovered ? 0x2a384c : 0x000000)
             this.sideMaterial.color.set(hovered ? "#94a3b8" : "#64748b")
         }
     }
 
-    set(name) {
-        if (!isNaN(name)) {
+    public set(name: string | number): void {
+        if (typeof name === 'string' && !isNaN(Number(name))) {
             name = parseInt(name)
         }
         this.value = name
@@ -227,8 +245,8 @@ export default class Tile {
         this.texture.offset.x = 0.0625 * num
     }
 
-    getNeighbours() {
-        const neighbours = []
+    public getNeighbours(): Tile[] {
+        const neighbours: Tile[] = []
         for (let nx = this.x - 1; nx <= this.x + 1; nx++) {
             for (let nz = this.z - 1; nz <= this.z + 1; nz++) {
                 if (nx === this.x && nz === this.z) continue
@@ -241,17 +259,16 @@ export default class Tile {
         return neighbours
     }
 
-    toggleFlag() {
+    public toggleFlag(): void {
         if (!this.isOpen()) {
             this.flag.toggle()
         }
     }
 
-    open(silent = false) {
+    public open(silent = false): void {
         if (this.board.blockActions) return
         if (this.flag.isVisible() || this.isOpen()) return
 
-        // Generate bombs safely on the first click
         if (!this.board.bombsGenerated) {
             this.board.generateBombs(this.x, this.z)
             this.board.setTileValues()
@@ -273,7 +290,7 @@ export default class Tile {
             this.game.addPoints(1)
             this.openNeighbours()
         } else {
-            const num = parseInt(this.value) || 0
+            const num = typeof this.value === 'number' ? this.value : parseInt(this.value) || 0
             this.game.addPoints(num)
         }
 
@@ -282,15 +299,15 @@ export default class Tile {
         }
     }
 
-    openNeighbours() {
-        for (let neighbour of this.getNeighbours()) {
+    public openNeighbours(): void {
+        for (const neighbour of this.getNeighbours()) {
             if (!neighbour.isOpen() && !neighbour.flag.isVisible()) {
                 neighbour.open(true)
             }
         }
     }
 
-    close() {
+    public close(): void {
         this.setHover(false)
         if (this.isOpen()) {
             this.game.scene.remove(this.mesh)
@@ -301,7 +318,7 @@ export default class Tile {
         this.set("empty")
     }
 
-    isOpen() {
+    public isOpen(): boolean {
         return this.mesh === this.flatMesh
     }
 }

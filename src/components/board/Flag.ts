@@ -1,30 +1,40 @@
 import {
-    Vector3,
-    Box3,
     DoubleSide,
     Group,
     CylinderGeometry,
     ConeGeometry,
     MeshStandardMaterial,
-    Mesh
+    Mesh,
+    Object3D,
+    Material,
+    LoadingManager
 } from 'three'
 
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js'
 import { MTLLoader } from 'three/examples/jsm/loaders/MTLLoader.js'
 import obj from '../../assets/flag.obj'
 import mtl from '../../assets/flag.mtl'
+import type Tile from './Tile'
+import type Board from './Board'
+import type Game from '../Game'
 
 export default class Flag {
-    constructor(tile) {
+    public tile: Tile
+    public board: Board
+    public x: number
+    public z: number
+    public game: Game
+    public mesh: Object3D | null = null
+
+    constructor(tile: Tile) {
         this.tile = tile
         this.board = this.tile.board
         this.x = this.tile.x
         this.z = this.tile.z
         this.game = this.board.game
-        this.mesh = null
     }
 
-    static preload(manager, callback) {
+    public static preload(manager: LoadingManager, callback: (flag: Object3D) => void): void {
         const mtlLoader = new MTLLoader(manager)
         mtlLoader.load(
             mtl,
@@ -50,16 +60,15 @@ export default class Flag {
         )
     }
 
-    createFallbackMesh() {
+    private createFallbackMesh(): Group {
         const group = new Group()
-        // Pole
+
         const poleGeo = new CylinderGeometry(0.6, 0.6, 18, 8)
         const poleMat = new MeshStandardMaterial({ color: 0xcccccc, metalness: 0.8, roughness: 0.2 })
         const pole = new Mesh(poleGeo, poleMat)
         pole.position.y = 9
         group.add(pole)
 
-        // Flag triangle
         const flagGeo = new ConeGeometry(5, 8, 3)
         const flagMat = new MeshStandardMaterial({ color: 0xef4444, side: DoubleSide, roughness: 0.4 })
         const flag = new Mesh(flagGeo, flagMat)
@@ -70,24 +79,30 @@ export default class Flag {
         return group
     }
 
-    load() {
+    public load(): void {
         if (this.board.preloadedFlag) {
             this.mesh = this.board.preloadedFlag.clone()
-            // Clone materials so we can customize without affecting other flags
             this.mesh.traverse(child => {
-                if (child.isMesh && child.material) {
-                    if (Array.isArray(child.material)) {
-                        child.material = child.material.map(m => m.clone())
+                const meshChild = child as Mesh
+                if (meshChild.isMesh && meshChild.material) {
+                    if (Array.isArray(meshChild.material)) {
+                        meshChild.material = meshChild.material.map(m => {
+                            const cloned = m.clone()
+                            cloned.side = DoubleSide
+                            return cloned
+                        })
                     } else {
-                        child.material = child.material.clone()
+                        const cloned = (meshChild.material as Material).clone()
+                        cloned.side = DoubleSide
+                        meshChild.material = cloned
                     }
-                    child.material.side = DoubleSide
                 }
             })
-            // Tint flag cloth red
+
             if (this.mesh.children && this.mesh.children.length > 0) {
-                if (this.mesh.children[0] && this.mesh.children[0].material) {
-                    this.mesh.children[0].material.color.set(0xef4444)
+                const first = this.mesh.children[0] as Mesh
+                if (first && first.material && 'color' in first.material) {
+                    (first.material as MeshStandardMaterial).color.set(0xef4444)
                 }
             }
         } else {
@@ -96,7 +111,7 @@ export default class Flag {
         this.setPosition()
     }
 
-    setPosition() {
+    public setPosition(): void {
         if (!this.mesh) return
 
         this.mesh.position.x = this.board.tileSize * this.x - this.board.width * this.board.tileSize / 2 + this.board.tileSize / 2
@@ -104,11 +119,11 @@ export default class Flag {
         this.mesh.position.y = (this.tile && this.tile.size && this.tile.size.y) ? this.tile.size.y : 7
     }
 
-    isVisible() {
+    public isVisible(): boolean {
         return !!(this.mesh && this.mesh.parent === this.game.scene)
     }
 
-    toggle() {
+    public toggle(): void {
         if (this.isVisible()) {
             this.hide()
         } else {
@@ -116,7 +131,7 @@ export default class Flag {
         }
     }
 
-    show(silent = false) {
+    public show(silent = false): void {
         if (this.board.blockActions) return
         if (!this.mesh) {
             this.load()
@@ -129,7 +144,7 @@ export default class Flag {
         }
     }
 
-    hide(silent = false) {
+    public hide(silent = false): void {
         if (this.board.blockActions && !silent) return
         if (this.mesh && this.isVisible()) {
             this.game.scene.remove(this.mesh)
@@ -139,7 +154,7 @@ export default class Flag {
         }
     }
 
-    set(visible) {
+    public set(visible: boolean): void {
         if (visible) {
             this.show()
         } else {
@@ -147,7 +162,7 @@ export default class Flag {
         }
     }
 
-    setSilent(visible) {
+    public setSilent(visible: boolean): void {
         if (visible) {
             this.show(true)
         } else {

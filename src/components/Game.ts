@@ -11,30 +11,41 @@ import Floor from './board/Floor'
 import Board from './board/Board'
 import Player from './Player'
 import PlayerController from './PlayerController'
+import type Tile from './board/Tile'
 
 export default class Game {
-    constructor(container) {
+    public container: HTMLElement
+    public manager: LoadingManager
+    public scene!: Scene
+    public camera!: PerspectiveCamera
+    public renderer!: Renderer
+    public clock!: Clock
+    public floor!: Floor
+    public board!: Board
+    public player!: Player
+    public playerController!: PlayerController
+
+    public points = 0
+    public timer = 0
+    public timerInterval: ReturnType<typeof setInterval> | null = null
+    public flagsPlaced = 0
+
+    constructor(container: HTMLElement) {
         this.container = container
         this.manager = new LoadingManager()
-
-        this.points = 0
-        this.timer = 0
-        this.timerInterval = null
-        this.flagsPlaced = 0
 
         this.createWorld()
         this.updateHUD()
         this.render()
     }
 
-    createWorld() {
+    public createWorld(): void {
         this.clock = new Clock()
         this.scene = new Scene()
 
         this.renderer = new Renderer()
         this.container.appendChild(this.renderer.domElement)
 
-        // Lighting
         const ambientLight = new AmbientLight(0xffffff, 0.85)
         this.scene.add(ambientLight)
 
@@ -42,24 +53,20 @@ export default class Game {
         dirLight.position.set(150, 400, 200)
         this.scene.add(dirLight)
 
-        // Camera
         const aspect = window.innerWidth / window.innerHeight
         this.camera = new PerspectiveCamera(75, aspect, 0.1, 5000)
         this.scene.add(this.camera)
 
-        // 3D Floor Platform
         this.floor = new Floor(700, 700)
         this.scene.add(this.floor)
 
-        // Minesweeper Board
         this.board = new Board(this)
 
-        // First Person Player & Controller
         this.player = new Player(this)
         this.playerController = new PlayerController(this)
     }
 
-    startTimer() {
+    public startTimer(): void {
         if (this.timerInterval) return
         this.timer = 0
         this.timerInterval = setInterval(() => {
@@ -71,19 +78,19 @@ export default class Game {
         }, 1000)
     }
 
-    stopTimer() {
+    public stopTimer(): void {
         if (this.timerInterval) {
             clearInterval(this.timerInterval)
             this.timerInterval = null
         }
     }
 
-    addPoints(difference) {
+    public addPoints(difference: number): void {
         this.points += difference
 
         const pointsEl = document.getElementById("points")
         if (pointsEl) {
-            pointsEl.innerText = this.points
+            pointsEl.innerText = this.points.toString()
         }
 
         const container = document.getElementById("pointsChangeContainer")
@@ -101,7 +108,7 @@ export default class Game {
         }
     }
 
-    onFlagPlaced(tile) {
+    public onFlagPlaced(tile: Tile): void {
         this.flagsPlaced++
         if (tile.value === "bomb") {
             this.addPoints(50)
@@ -115,7 +122,7 @@ export default class Game {
         }
     }
 
-    onFlagRemoved(tile) {
+    public onFlagRemoved(tile: Tile): void {
         this.flagsPlaced = Math.max(0, this.flagsPlaced - 1)
         if (tile.value === "bomb") {
             this.addPoints(-50)
@@ -125,10 +132,10 @@ export default class Game {
         this.updateHUD()
     }
 
-    updateHUD() {
+    public updateHUD(): void {
         const pointsEl = document.getElementById("points")
         if (pointsEl) {
-            pointsEl.innerText = this.points
+            pointsEl.innerText = this.points.toString()
         }
 
         const minesEl = document.getElementById("minesCount")
@@ -143,7 +150,7 @@ export default class Game {
         }
     }
 
-    gameOver(explodedTile) {
+    public gameOver(_explodedTile: Tile): void {
         this.stopTimer()
         this.board.blockActions = true
         this.board.revealAllBombs()
@@ -155,11 +162,11 @@ export default class Game {
         this.showPopup("💥 GAME OVER", "You triggered a mine!", "#ef4444")
     }
 
-    gameWon() {
+    public gameWon(): void {
         this.stopTimer()
         this.board.blockActions = true
         this.board.flagAllBombs()
-        this.addPoints(500) // Victory bonus
+        this.addPoints(500)
 
         if (this.playerController && this.playerController.controls) {
             this.playerController.controls.unlock()
@@ -168,7 +175,7 @@ export default class Game {
         this.showPopup("🎉 VICTORY!", "You safely cleared the entire minefield!", "#22c55e")
     }
 
-    showPopup(title, subtitle, accentColor) {
+    public showPopup(title: string, subtitle: string, accentColor: string): void {
         const existing = document.getElementById("popup")
         if (existing) existing.remove()
 
@@ -217,7 +224,7 @@ export default class Game {
         document.body.appendChild(popup)
     }
 
-    restart() {
+    public restart(): void {
         const popup = document.getElementById("popup")
         if (popup) popup.remove()
 
@@ -234,7 +241,7 @@ export default class Game {
         if (changeContainer) changeContainer.innerHTML = ""
     }
 
-    render() {
+    public render(): void {
         const delta = this.clock.getDelta()
         this.playerController.update(delta)
         this.renderer.render(this.scene, this.camera)

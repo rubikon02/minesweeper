@@ -6,7 +6,7 @@ import {
 export default class Renderer extends WebGLRenderer {
     constructor() {
         super({ antialias: true, powerPreference: 'high-performance' })
-        this.setClearColor(0x0f172a) // Modern slate dark theme
+        this.setClearColor(0x0f172a)
         this.shadowMap.enabled = false
         this.shadowMap.type = PCFSoftShadowMap
 
@@ -14,7 +14,7 @@ export default class Renderer extends WebGLRenderer {
         window.addEventListener('resize', () => this.updateSize())
     }
 
-    updateSize() {
+    public updateSize(): void {
         this.setSize(window.innerWidth, window.innerHeight)
     }
 }

@@ -1,0 +1,21 @@
+/// <reference types="vite/client" />
+
+declare module '*.png' {
+    const src: string
+    export default src
+}
+
+declare module '*.ico' {
+    const src: string
+    export default src
+}
+
+declare module '*.obj' {
+    const src: string
+    export default src
+}
+
+declare module '*.mtl' {
+    const src: string
+    export default src
+}

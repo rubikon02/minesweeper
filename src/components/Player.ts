@@ -6,19 +6,25 @@ import {
     BufferAttribute,
     Line
 } from "three"
+import type Game from './Game'
+import type Tile from './board/Tile'
+import type { TileMesh } from './board/Tile'
 
 export default class Player {
-    constructor(game) {
+    public game: Game
+    public raycaster: Raycaster
+    public mouse: Vector2
+    public tileLookedAt: Tile | null = null
+
+    constructor(game: Game) {
         this.game = game
-        this.scene = this.game.scene
         this.raycaster = new Raycaster()
-        this.mouse = new Vector2(0, 0) // Center of screen
-        this.tileLookedAt = null
+        this.mouse = new Vector2(0, 0)
 
         this.createCrosshair()
     }
 
-    createCrosshair() {
+    private createCrosshair(): void {
         const material = new LineBasicMaterial({
             color: 0xff4444,
             linewidth: 2,
@@ -40,7 +46,7 @@ export default class Player {
         this.game.camera.add(crosshair)
     }
 
-    update(delta) {
+    public update(_delta: number): void {
         if (!this.game.board || !this.game.board.tiles) return
 
         this.raycaster.setFromCamera(this.mouse, this.game.camera)
@@ -48,9 +54,9 @@ export default class Player {
         const tileMeshes = this.game.board.tiles.map(tile => tile.mesh)
         const intersects = this.raycaster.intersectObjects(tileMeshes, false)
 
-        let targetTile = null
+        let targetTile: Tile | null = null
         if (intersects.length > 0 && intersects[0].distance < 450) {
-            targetTile = intersects[0].object.parentObject || null
+            targetTile = (intersects[0].object as TileMesh).parentObject || null
         }
 
         if (this.tileLookedAt !== targetTile) {
