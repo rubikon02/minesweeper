@@ -1,9 +1,8 @@
-import { Vector3, Vector2, Scene } from 'three'
+import { Vector3, Scene } from 'three'
 import { PointerLockControls } from 'three/examples/jsm/controls/PointerLockControls.js'
 import type Game from './Game'
 import type Renderer from './Renderer'
 import type Player from './Player'
-import type Tile from './board/Tile'
 
 export default class PlayerController {
     public game: Game
@@ -16,8 +15,8 @@ export default class PlayerController {
     public walkingSpeed = 1.3
     public sprintingSpeed = 1.9
 
-    // Height levels
-    public readonly walkHeight = 45
+    // Player height: raised to 85 so player comfortably overlooks the tiles
+    public readonly walkHeight = 85
     public readonly birdEyeHeight = 540
 
     public isBirdEye = false
@@ -45,7 +44,7 @@ export default class PlayerController {
         this.isBirdEye = false
         this.savedWalkPos = { x: 0, z: 240 }
         this.game.camera.position.set(0, this.walkHeight, 240)
-        this.game.camera.lookAt(new Vector3(0, this.walkHeight, 0))
+        this.game.camera.lookAt(new Vector3(0, this.walkHeight - 20, 100))
     }
 
     public toggleBirdEye(): void {
@@ -61,9 +60,9 @@ export default class PlayerController {
             this.game.camera.position.set(0, this.birdEyeHeight, 220)
             this.game.camera.lookAt(new Vector3(0, 0, 0))
         } else {
-            // Restore ground position looking forward across the board
+            // Restore ground position with proper forward/downward pitch
             this.game.camera.position.set(this.savedWalkPos.x, this.walkHeight, this.savedWalkPos.z)
-            this.game.camera.lookAt(new Vector3(this.savedWalkPos.x, this.walkHeight, this.savedWalkPos.z - 100))
+            this.game.camera.lookAt(new Vector3(this.savedWalkPos.x, this.walkHeight - 20, this.savedWalkPos.z - 100))
         }
     }
 
@@ -124,23 +123,20 @@ export default class PlayerController {
             if (target && target.closest('#popup')) return
             if (this.game.board && this.game.board.blockActions) return
 
-            let targetTile: Tile | null = null
-            if (this.controls.isLocked) {
-                targetTile = this.player.tileLookedAt
-            } else {
-                const mousePos = new Vector2(
-                    (e.clientX / window.innerWidth) * 2 - 1,
-                    -(e.clientY / window.innerHeight) * 2 + 1
-                )
-                targetTile = this.player.getRaycastTarget(mousePos)
+            // If not locked yet, only lock controls and do NOT interact (prevents missclick on focus)
+            if (!this.controls.isLocked) {
                 this.controls.lock()
+                return
             }
 
-            if (e.button === 0 && targetTile) {
-                targetTile.open()
-            }
-            if (e.button === 2 && targetTile) {
-                targetTile.toggleFlag()
+            // Only interact when controls are already locked
+            if (this.player.tileLookedAt) {
+                if (e.button === 0) {
+                    this.player.tileLookedAt.open()
+                }
+                if (e.button === 2) {
+                    this.player.tileLookedAt.toggleFlag()
+                }
             }
         })
     }

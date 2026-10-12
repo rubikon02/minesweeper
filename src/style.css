@@ -20,6 +20,58 @@ body {
     display: block;
 }
 
+/* Center Crosshair / Reticle */
+#crosshair {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: rgba(239, 68, 68, 0.9);
+    box-shadow: 0 0 8px rgba(239, 68, 68, 0.8), 0 0 2px #ffffff;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    z-index: 50;
+    transition: transform 0.12s ease, background 0.12s ease, box-shadow 0.12s ease;
+}
+
+#crosshair::before,
+#crosshair::after {
+    content: '';
+    position: absolute;
+    background: rgba(255, 255, 255, 0.85);
+    border-radius: 1px;
+}
+
+/* Horizontal line */
+#crosshair::before {
+    top: 2px;
+    left: -8px;
+    width: 22px;
+    height: 2px;
+}
+
+/* Vertical line */
+#crosshair::after {
+    top: -8px;
+    left: 2px;
+    width: 2px;
+    height: 22px;
+}
+
+/* Active targeting state when looking at a tile */
+#crosshair.targeted {
+    background: #38bdf8;
+    box-shadow: 0 0 10px #38bdf8, 0 0 3px #ffffff;
+    transform: translate(-50%, -50%) scale(1.3);
+}
+
+#crosshair.targeted::before,
+#crosshair.targeted::after {
+    background: #38bdf8;
+}
+
 /* HUD Overlay */
 #ui {
     position: absolute;

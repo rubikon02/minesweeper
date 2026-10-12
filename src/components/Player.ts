@@ -1,10 +1,6 @@
 import {
     Raycaster,
-    Vector2,
-    LineBasicMaterial,
-    BufferGeometry,
-    BufferAttribute,
-    Line
+    Vector2
 } from "three"
 import type Game from './Game'
 import type Tile from './board/Tile'
@@ -15,35 +11,13 @@ export default class Player {
     public raycaster: Raycaster
     public mouse: Vector2
     public tileLookedAt: Tile | null = null
+    private crosshairEl: HTMLElement | null = null
 
     constructor(game: Game) {
         this.game = game
         this.raycaster = new Raycaster()
         this.mouse = new Vector2(0, 0)
-
-        this.createCrosshair()
-    }
-
-    private createCrosshair(): void {
-        const material = new LineBasicMaterial({
-            color: 0xff4444,
-            linewidth: 2,
-        })
-        const size = 0.005
-        const geometry = new BufferGeometry()
-
-        const vertices = new Float32Array([
-            0, size, 0,
-            0, -size, 0,
-            0, 0, 0,
-            size, 0, 0,
-            -size, 0, 0,
-        ])
-        geometry.setAttribute("position", new BufferAttribute(vertices, 3))
-        const crosshair = new Line(geometry, material)
-        crosshair.position.set(0, 0, -0.3)
-
-        this.game.camera.add(crosshair)
+        this.crosshairEl = document.getElementById("crosshair")
     }
 
     public getRaycastTarget(coords: Vector2 = this.mouse): Tile | null {
@@ -73,6 +47,13 @@ export default class Player {
                 targetTile.setHover(true)
             }
             this.tileLookedAt = targetTile
+
+            if (!this.crosshairEl) {
+                this.crosshairEl = document.getElementById("crosshair")
+            }
+            if (this.crosshairEl) {
+                this.crosshairEl.classList.toggle("targeted", targetTile !== null)
+            }
         }
     }
 }
