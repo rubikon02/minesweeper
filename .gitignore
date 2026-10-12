@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+
+# Production build output
+dist/
+
+# IDE & Editor settings
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs & temporary files
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.log

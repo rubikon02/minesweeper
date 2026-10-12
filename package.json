@@ -1,0 +1,25 @@
+{
+    "name": "minesweeper",
+    "version": "1.0.0",
+    "description": "",
+    "main": "script.js",
+    "dependencies": {
+        "css-loader": "^7.1.5",
+        "html-webpack-plugin": "^5.6.8",
+        "style-loader": "^4.0.0"
+    },
+    "devDependencies": {
+        "three": "^0.186.1",
+        "webpack": "^5.111.1",
+        "webpack-cli": "^7.2.3"
+    },
+    "scripts": {
+        "build": "webpack",
+        "watch": "webpack --progress --watch",
+        "server": "node server.js",
+        "start": "node server.js",
+        "go": "npm run build && npm run server"
+    },
+    "author": "",
+    "license": "ISC"
+}

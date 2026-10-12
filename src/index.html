@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/png" href="images/favicon.ico" />
+    <title>3D Minesweeper</title>
+</head>
+
+<body>
+    <div id="root"></div>
+
+    <div id="ui">
+        <div class="hud-card score-card">
+            <div class="hud-title">SCORE</div>
+            <div class="score-display">
+                <span id="points">0</span>
+                <div id="pointsChangeContainer">
+                    <div id="pointsChange"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="hud-card stats-card">
+            <div class="stat-line">
+                <span class="stat-icon">🚩</span>
+                <span class="stat-label">Mines:</span>
+                <span id="minesCount" class="stat-val">52 / 52</span>
+            </div>
+            <div class="stat-line">
+                <span class="stat-icon">⏱️</span>
+                <span class="stat-label">Time:</span>
+                <span id="timeCount" class="stat-val">0s</span>
+            </div>
+        </div>
+
+        <div class="hud-card controls-card">
+            <div class="hud-title">CONTROLS</div>
+            <div class="control-row">
+                <span class="key-badge">WASD</span>
+                <span class="key-desc">Walk</span>
+            </div>
+            <div class="control-row">
+                <span class="key-badge">Space / C</span>
+                <span class="key-desc">Up / Down</span>
+            </div>
+            <div class="control-row">
+                <span class="key-badge">Shift</span>
+                <span class="key-desc">Sprint</span>
+            </div>
+            <div class="control-row">
+                <span class="key-badge">LMB</span>
+                <span class="key-desc">Reveal</span>
+            </div>
+            <div class="control-row">
+                <span class="key-badge">RMB</span>
+                <span class="key-desc">Flag</span>
+            </div>
+            <div class="control-row">
+                <span class="key-badge">R</span>
+                <span class="key-desc">Restart</span>
+            </div>
+            <div class="control-row">
+                <span class="key-badge">Click</span>
+                <span class="key-desc">Lock Look</span>
+            </div>
+        </div>
+    </div>
+</body>
+
+</html>
