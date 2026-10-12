@@ -11,9 +11,16 @@ export default class PlayerController {
     public player: Player
     public controls: PointerLockControls
 
-    public walkingSpeed = 2.5
-    public sprintingSpeed = 6.0
-    public verticalSpeed = 2.0
+    // Movement speeds: walking ~half speed, sprint moderately faster
+    public walkingSpeed = 1.3
+    public sprintingSpeed = 1.9
+
+    // Height levels
+    public readonly walkHeight = 45
+    public readonly birdEyeHeight = 540
+
+    public isBirdEye = false
+    public savedWalkPos: { x: number; z: number } = { x: 0, z: 240 }
 
     public keys: Record<string, boolean> = {}
 
@@ -34,8 +41,29 @@ export default class PlayerController {
     }
 
     public resetPosition(): void {
-        this.game.camera.position.set(0, 80, 240)
-        this.game.camera.lookAt(new Vector3(0, 0, 0))
+        this.isBirdEye = false
+        this.savedWalkPos = { x: 0, z: 240 }
+        this.game.camera.position.set(0, this.walkHeight, 240)
+        this.game.camera.lookAt(new Vector3(0, this.walkHeight, 0))
+    }
+
+    public toggleBirdEye(): void {
+        this.isBirdEye = !this.isBirdEye
+
+        if (this.isBirdEye) {
+            // Save ground position
+            this.savedWalkPos = {
+                x: this.game.camera.position.x,
+                z: this.game.camera.position.z,
+            }
+            // Elevate to fixed bird's-eye view looking down towards board center
+            this.game.camera.position.set(0, this.birdEyeHeight, 220)
+            this.game.camera.lookAt(new Vector3(0, 0, 0))
+        } else {
+            // Restore ground position looking forward across the board
+            this.game.camera.position.set(this.savedWalkPos.x, this.walkHeight, this.savedWalkPos.z)
+            this.game.camera.lookAt(new Vector3(this.savedWalkPos.x, this.walkHeight, this.savedWalkPos.z - 100))
+        }
     }
 
     private initControls(): void {
@@ -74,12 +102,8 @@ export default class PlayerController {
             this.controls.moveRight(speed)
         }
 
-        if (this.keys["Space"] || this.keys["KeyE"]) {
-            this.game.camera.position.y = Math.min(500, this.game.camera.position.y + this.verticalSpeed)
-        }
-        if (this.keys["KeyC"] || this.keys["KeyQ"]) {
-            this.game.camera.position.y = Math.max(25, this.game.camera.position.y - this.verticalSpeed)
-        }
+        // Strict fixed elevation for each mode: no flying up/down, C does nothing
+        this.game.camera.position.y = this.isBirdEye ? this.birdEyeHeight : this.walkHeight
 
         this.player.update(delta)
     }
@@ -87,6 +111,13 @@ export default class PlayerController {
     private addKeyListeners(): void {
         document.addEventListener("keydown", (e: KeyboardEvent) => {
             this.keys[e.code] = true
+
+            if (e.code === "Space") {
+                e.preventDefault()
+                if (!e.repeat) {
+                    this.toggleBirdEye()
+                }
+            }
 
             if (e.code === "KeyR") {
                 this.game.restart()

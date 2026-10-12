@@ -55,7 +55,8 @@ export default class Player {
         const intersects = this.raycaster.intersectObjects(tileMeshes, false)
 
         let targetTile: Tile | null = null
-        if (intersects.length > 0 && intersects[0].distance < 450) {
+        const maxDistance = (this.game.playerController && this.game.playerController.isBirdEye) ? 950 : 450
+        if (intersects.length > 0 && intersects[0].distance < maxDistance) {
             targetTile = (intersects[0].object as TileMesh).parentObject || null
         }
 
