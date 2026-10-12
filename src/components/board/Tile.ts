@@ -68,7 +68,7 @@ export default class Tile {
         const posZ = board.tileSize * this.z - board.height * board.tileSize / 2 + board.tileSize / 2
 
         this.convexMesh.position.set(posX, 0, posZ)
-        this.flatMesh.position.set(posX, 0.05, posZ)
+        this.flatMesh.position.set(posX, 0.2, posZ)
 
         this.flag = new Flag(this)
     }
@@ -175,7 +175,8 @@ export default class Tile {
         if (!sharedTopTexture) {
             sharedTopTexture = new TextureLoader().load(tileTexture)
             sharedTopTexture.magFilter = NearestFilter
-            sharedTopTexture.minFilter = LinearMipMapLinearFilter
+            sharedTopTexture.minFilter = NearestFilter
+            sharedTopTexture.generateMipmaps = false
             sharedTopTexture.offset.set(0, 0)
             sharedTopTexture.repeat.set(0.0625, 1)
         }
@@ -203,17 +204,20 @@ export default class Tile {
     private createFlatMesh(): void {
         this.texture = new TextureLoader().load(tileTexture)
         this.texture.magFilter = NearestFilter
-        this.texture.minFilter = LinearMipMapLinearFilter
+        this.texture.minFilter = NearestFilter
+        this.texture.generateMipmaps = false
         this.texture.offset.set(0, 0)
         this.texture.repeat.set(0.0625, 1)
 
         const geometry = new PlaneGeometry(this.scale, this.scale)
         const material = new MeshPhongMaterial({
             color: "white",
-            specular: 0x222222,
-            shininess: 10,
-            side: DoubleSide,
+            specular: 0x000000,
+            shininess: 0,
             map: this.texture,
+            polygonOffset: true,
+            polygonOffsetFactor: -1,
+            polygonOffsetUnits: -1,
         })
 
         this.flatMesh = new Mesh(geometry, material) as TileMesh

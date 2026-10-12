@@ -1,8 +1,9 @@
-import { Vector3, Scene } from 'three'
+import { Vector3, Vector2, Scene } from 'three'
 import { PointerLockControls } from 'three/examples/jsm/controls/PointerLockControls.js'
 import type Game from './Game'
 import type Renderer from './Renderer'
 import type Player from './Player'
+import type Tile from './board/Tile'
 
 export default class PlayerController {
     public game: Game
@@ -67,16 +68,6 @@ export default class PlayerController {
     }
 
     private initControls(): void {
-        document.body.addEventListener('click', (e: MouseEvent) => {
-            const target = e.target as HTMLElement | null
-            if (target && target.closest('#popup')) return
-            if (this.game.board && this.game.board.blockActions) return
-
-            if (!this.controls.isLocked) {
-                this.controls.lock()
-            }
-        })
-
         window.addEventListener('contextmenu', (e: MouseEvent) => {
             e.preventDefault()
         })
@@ -129,17 +120,27 @@ export default class PlayerController {
         })
 
         document.addEventListener("mousedown", (e: MouseEvent) => {
-            if (this.controls.isLocked && !this.game.board.blockActions) {
-                if (e.button === 0) {
-                    if (this.player.tileLookedAt) {
-                        this.player.tileLookedAt.open()
-                    }
-                }
-                if (e.button === 2) {
-                    if (this.player.tileLookedAt) {
-                        this.player.tileLookedAt.toggleFlag()
-                    }
-                }
+            const target = e.target as HTMLElement | null
+            if (target && target.closest('#popup')) return
+            if (this.game.board && this.game.board.blockActions) return
+
+            let targetTile: Tile | null = null
+            if (this.controls.isLocked) {
+                targetTile = this.player.tileLookedAt
+            } else {
+                const mousePos = new Vector2(
+                    (e.clientX / window.innerWidth) * 2 - 1,
+                    -(e.clientY / window.innerHeight) * 2 + 1
+                )
+                targetTile = this.player.getRaycastTarget(mousePos)
+                this.controls.lock()
+            }
+
+            if (e.button === 0 && targetTile) {
+                targetTile.open()
+            }
+            if (e.button === 2 && targetTile) {
+                targetTile.toggleFlag()
             }
         })
     }

@@ -46,19 +46,24 @@ export default class Player {
         this.game.camera.add(crosshair)
     }
 
+    public getRaycastTarget(coords: Vector2 = this.mouse): Tile | null {
+        if (!this.game.board || !this.game.board.tiles) return null
+
+        this.raycaster.setFromCamera(coords, this.game.camera)
+        const tileMeshes = this.game.board.tiles.map(tile => tile.mesh)
+        const intersects = this.raycaster.intersectObjects(tileMeshes, false)
+        const maxDistance = (this.game.playerController && this.game.playerController.isBirdEye) ? 1200 : 500
+
+        if (intersects.length > 0 && intersects[0].distance < maxDistance) {
+            return (intersects[0].object as TileMesh).parentObject || null
+        }
+        return null
+    }
+
     public update(_delta: number): void {
         if (!this.game.board || !this.game.board.tiles) return
 
-        this.raycaster.setFromCamera(this.mouse, this.game.camera)
-
-        const tileMeshes = this.game.board.tiles.map(tile => tile.mesh)
-        const intersects = this.raycaster.intersectObjects(tileMeshes, false)
-
-        let targetTile: Tile | null = null
-        const maxDistance = (this.game.playerController && this.game.playerController.isBirdEye) ? 950 : 450
-        if (intersects.length > 0 && intersects[0].distance < maxDistance) {
-            targetTile = (intersects[0].object as TileMesh).parentObject || null
-        }
+        const targetTile = this.getRaycastTarget(this.mouse)
 
         if (this.tileLookedAt !== targetTile) {
             if (this.tileLookedAt && typeof this.tileLookedAt.setHover === 'function') {

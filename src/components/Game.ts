@@ -54,7 +54,7 @@ export default class Game {
         this.scene.add(dirLight)
 
         const aspect = window.innerWidth / window.innerHeight
-        this.camera = new PerspectiveCamera(75, aspect, 0.1, 5000)
+        this.camera = new PerspectiveCamera(75, aspect, 1, 4000)
         this.scene.add(this.camera)
 
         this.floor = new Floor(700, 700)

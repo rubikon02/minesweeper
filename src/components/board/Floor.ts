@@ -19,13 +19,14 @@ export default class Floor extends Group {
         })
         const ground = new Mesh(groundGeo, groundMat)
         ground.rotation.x = -Math.PI / 2
-        ground.position.y = -2
+        ground.position.y = -5
         this.add(ground)
 
         const grid = new GridHelper(4000, 80, 0x1e293b, 0x0f172a)
-        grid.position.y = -1.8
+        grid.position.y = -4.8
         this.add(grid)
 
+        // Platform base lowered so its top face is at y = -1, completely avoiding Z-fighting with tiles
         const borderPadding = 24
         const platformWidth = boardWidth + borderPadding * 2
         const platformHeight = boardHeight + borderPadding * 2
@@ -36,7 +37,7 @@ export default class Floor extends Group {
             metalness: 0.3
         })
         const platform = new Mesh(platformGeo, platformMat)
-        platform.position.y = -2
+        platform.position.y = -3 // Height 4 -> top is at y = -1.0
         this.add(platform)
     }
 }
