@@ -1,10 +1,14 @@
 import {
     Scene,
     AmbientLight,
+    HemisphereLight,
     DirectionalLight,
     Clock,
     PerspectiveCamera,
-    LoadingManager
+    LoadingManager,
+    Fog,
+    Color,
+    CanvasTexture
 } from 'three'
 import Renderer from './Renderer'
 import Floor from './board/Floor'
@@ -12,6 +16,23 @@ import Board from './board/Board'
 import Player from './Player'
 import PlayerController from './PlayerController'
 import type Tile from './board/Tile'
+
+// Simple vertical gradient used as the sky backdrop.
+function createSkyTexture(): CanvasTexture {
+    const canvas = document.createElement('canvas')
+    canvas.width = 2
+    canvas.height = 256
+    const ctx = canvas.getContext('2d')!
+    const gradient = ctx.createLinearGradient(0, 0, 0, 256)
+    gradient.addColorStop(0, '#7fb2e5')
+    gradient.addColorStop(0.5, '#bcd9ef')
+    gradient.addColorStop(1, '#e7f0e3')
+    ctx.fillStyle = gradient
+    ctx.fillRect(0, 0, 2, 256)
+    const texture = new CanvasTexture(canvas)
+    texture.needsUpdate = true
+    return texture
+}
 
 export default class Game {
     public container: HTMLElement
@@ -46,10 +67,17 @@ export default class Game {
         this.renderer = new Renderer()
         this.container.appendChild(this.renderer.domElement)
 
-        const ambientLight = new AmbientLight(0xffffff, 0.85)
+        const skyColor = new Color('#bcd9ef')
+        this.scene.background = createSkyTexture()
+        this.scene.fog = new Fog(skyColor, 1200, 3800)
+
+        const hemiLight = new HemisphereLight(0xbcd9ef, 0x556b3f, 0.9)
+        this.scene.add(hemiLight)
+
+        const ambientLight = new AmbientLight(0xffffff, 0.35)
         this.scene.add(ambientLight)
 
-        const dirLight = new DirectionalLight(0xffffff, 0.7)
+        const dirLight = new DirectionalLight(0xfff3e0, 1.1)
         dirLight.position.set(150, 400, 200)
         this.scene.add(dirLight)
 
@@ -244,6 +272,7 @@ export default class Game {
     public render(): void {
         const delta = this.clock.getDelta()
         this.playerController.update(delta)
+        this.board.update(delta)
         this.renderer.render(this.scene, this.camera)
         requestAnimationFrame(this.render.bind(this))
     }

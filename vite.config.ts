@@ -5,5 +5,5 @@ export default defineConfig({
     port: 8080,
     open: false,
   },
-  assetsInclude: ['**/*.obj', '**/*.mtl'],
+  assetsInclude: ['**/*.obj', '**/*.mtl', '**/*.glb'],
 })

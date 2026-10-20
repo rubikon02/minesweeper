@@ -108,6 +108,7 @@ export default class Flag {
         } else {
             this.mesh = this.createFallbackMesh()
         }
+        this.mesh.scale.setScalar(2)
         this.setPosition()
     }
 
@@ -116,7 +117,7 @@ export default class Flag {
 
         this.mesh.position.x = this.board.tileSize * this.x - this.board.width * this.board.tileSize / 2 + this.board.tileSize / 2
         this.mesh.position.z = this.board.tileSize * this.z - this.board.height * this.board.tileSize / 2 + this.board.tileSize / 2
-        this.mesh.position.y = (this.tile && this.tile.size && this.tile.size.y) ? this.tile.size.y : 7
+        this.mesh.position.y = this.board.terrain.heightAtWorld(this.mesh.position.x, this.mesh.position.z)
     }
 
     public isVisible(): boolean {

@@ -8,10 +8,11 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "simplex-noise": "^4.0.3",
     "three": "^0.186.1"
   },
   "devDependencies": {
-    "@types/three": "^0.186.1",
+    "@types/three": "^0.186.0",
     "typescript": "^5.8.2",
     "vite": "^6.2.0"
   }

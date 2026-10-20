@@ -2,234 +2,164 @@ import {
     Vector3,
     BufferGeometry,
     BufferAttribute,
-    MeshPhongMaterial,
-    TextureLoader,
-    Box3,
-    NearestFilter,
-    LinearMipMapLinearFilter,
-    PlaneGeometry,
-    DoubleSide,
     Mesh,
+    PlaneGeometry,
+    MeshBasicMaterial,
+    TextureLoader,
+    NearestFilter,
     Texture
 } from 'three'
 
 import Flag from './Flag'
+import Fog from './Fog'
 import tileTexture from '../../assets/tiles.png'
 import type Board from './Board'
+import type Terrain from './Terrain'
 import type Game from '../Game'
 
 export interface TileMesh extends Mesh {
     parentObject?: Tile
 }
 
-let sharedTopTexture: Texture | null = null
+// Base atlas texture, loaded once and cloned per tile so each tile can
+// point at a different cell of the sprite sheet.
+let baseTexture: Texture | null = null
 
 export default class Tile {
     public board: Board
+    public terrain: Terrain
     public x: number
     public z: number
     public game: Game
-    public height: number
-    public scale: number
     public value: string | number
+
+    public worldX: number
+    public worldZ: number
+    public surfaceY: number
+    // Highest corner of the tile, used to place icons and clouds above it.
+    public maxCornerY: number
+
     public flag: Flag
+    public fog: Fog
     public size: Vector3
 
+    // The sloped terrain surface. Always the raycast / click target.
     public mesh!: TileMesh
-    public convexMesh!: TileMesh
-    public flatMesh!: TileMesh
-
-    public topMaterial!: MeshPhongMaterial
-    public sideMaterial!: MeshPhongMaterial
+    // The number or bomb icon, drawn slightly above the surface.
+    public numberMesh!: Mesh
     public texture!: Texture
 
-    private angle = Math.PI / 3
-    private slope = 1 - 0.4 / Math.tan(Math.PI / 3)
+    private opened = false
 
     constructor(board: Board, x: number, z: number) {
         this.board = board
+        this.terrain = board.terrain
         this.x = x
         this.z = z
         this.game = this.board.game
-        this.height = 0.4
-        this.scale = this.board.tileSize
-
         this.value = "empty"
 
-        this.createConvexMesh()
-        this.createFlatMesh()
+        this.worldX = this.terrain.cornerWorldX(x) + board.tileSize / 2
+        this.worldZ = this.terrain.cornerWorldZ(z) + board.tileSize / 2
+        this.surfaceY = this.terrain.surfaceY(x, z)
+        const corners = this.terrain.tileCorners(x, z)
+        this.maxCornerY = Math.max(corners.a, corners.b, corners.c, corners.d)
 
-        this.mesh = this.convexMesh
+        this.size = new Vector3(board.tileSize, 0, board.tileSize)
 
-        this.size = new Vector3()
-        new Box3().setFromObject(this.mesh).getSize(this.size)
-
-        const posX = board.tileSize * this.x - board.width * board.tileSize / 2 + board.tileSize / 2
-        const posZ = board.tileSize * this.z - board.height * board.tileSize / 2 + board.tileSize / 2
-
-        this.convexMesh.position.set(posX, 0, posZ)
-        this.flatMesh.position.set(posX, 0.2, posZ)
+        this.createSurfaceMesh()
+        this.createNumberMesh()
+        this.mesh.position.set(this.worldX, 0, this.worldZ)
 
         this.flag = new Flag(this)
+        this.fog = new Fog(this)
     }
 
-    private createConvexMesh(): void {
-        let convexVertices = new Float32Array([
-            // left
-            -1, 0, -1,
-            -1, 0, 1,
-            -this.slope, this.height, -this.slope,
+    // Build a sloped quad from the four shared corner heights.
+    private createSurfaceMesh(): void {
+        const half = this.board.tileSize / 2
+        const c = this.terrain.tileCorners(this.x, this.z)
 
-            -1, 0, 1,
-            -this.slope, this.height, -this.slope,
-            -this.slope, this.height, this.slope,
+        // Local corner positions: x/z in [-half, half], y = corner height.
+        const a = [-half, c.a, -half] // (x,   z)
+        const b = [half, c.b, -half]  // (x+1, z)
+        const cc = [-half, c.c, half] // (x,   z+1)
+        const d = [half, c.d, half]   // (x+1, z+1)
 
-            // right
-            this.slope, this.height, -this.slope,
-            this.slope, this.height, this.slope,
-            1, 0, -1,
-
-            this.slope, this.height, this.slope,
-            1, 0, -1,
-            1, 0, 1,
-
-            // back
-            -this.slope, this.height, -this.slope,
-            this.slope, this.height, -this.slope,
-            -1, 0, -1,
-
-            this.slope, this.height, -this.slope,
-            -1, 0, -1,
-            1, 0, -1,
-
-            // front
-            -1, 0, 1,
-            1, 0, 1,
-            -this.slope, this.height, this.slope,
-
-            1, 0, 1,
-            -this.slope, this.height, this.slope,
-            this.slope, this.height, this.slope,
-
-            // top
-            this.slope, this.height, -this.slope,
-            this.slope, this.height, this.slope,
-            -this.slope, this.height, -this.slope,
-
-            this.slope, this.height, this.slope,
-            -this.slope, this.height, -this.slope,
-            -this.slope, this.height, this.slope,
-        ])
-        convexVertices = convexVertices.map(el => el * this.scale / 2)
-
-        const convexUvs = new Float32Array([
-            // left
-            1, 0,
-            0, 0,
-            1, 1,
-            0, 0,
-            1, 1,
-            0, 1,
-
-            // right
-            0, 0,
-            0, 1,
-            this.height / Math.tan(this.angle), this.height / Math.tan(this.angle),
-            0, 1,
-            this.height / Math.tan(this.angle), this.height / Math.tan(this.angle),
-            this.height / Math.tan(this.angle), 1 - this.height / Math.tan(this.angle),
-
-            // back
-            0, 0,
-            0, 1,
-            this.height / Math.tan(this.angle), this.height / Math.tan(this.angle),
-            0, 1,
-            this.height / Math.tan(this.angle), this.height / Math.tan(this.angle),
-            1 - this.height / Math.tan(this.angle), 1 - this.height / Math.tan(this.angle),
-
-            // front
-            0, 0,
-            1, 0,
-            this.height / Math.tan(this.angle) / 2, this.height / Math.tan(this.angle) / 2,
-            1, 0,
-            this.height / Math.tan(this.angle) / 2, this.height / Math.tan(this.angle) / 2,
-            1, 1,
-
-            // top
-            1, 1,
-            1, 0,
-            0, 1,
-            1, 0,
-            0, 1,
-            0, 0,
+        // Two triangles, wound so the surface faces up.
+        const positions = new Float32Array([
+            ...a, ...d, ...b,
+            ...a, ...cc, ...d,
         ])
 
-        const convexGeometry = new BufferGeometry()
-        convexGeometry.setAttribute("position", new BufferAttribute(convexVertices, 3))
-        convexGeometry.setAttribute("uv", new BufferAttribute(convexUvs, 2))
-        convexGeometry.computeVertexNormals()
+        // Continuous UVs in tile units, so the texture tiles seamlessly
+        // across neighbouring tiles instead of restarting on each one.
+        const x0 = this.x
+        const z0 = this.z
+        const x1 = this.x + 1
+        const z1 = this.z + 1
+        const uvs = new Float32Array([
+            x0, z0, x1, z1, x1, z0,
+            x0, z0, x0, z1, x1, z1,
+        ])
 
-        convexGeometry.addGroup(0, 24, 0)
-        convexGeometry.addGroup(24, 6, 1)
+        // One flat colour for the whole tile, from height and slope.
+        const slope = (Math.max(c.a, c.b, c.c, c.d) - Math.min(c.a, c.b, c.c, c.d)) / this.board.tileSize
+        const color = this.terrain.colorFor(this.surfaceY, slope)
+        const colors = new Float32Array([
+            color.r, color.g, color.b,
+            color.r, color.g, color.b,
+            color.r, color.g, color.b,
+            color.r, color.g, color.b,
+        ])
 
-        if (!sharedTopTexture) {
-            sharedTopTexture = new TextureLoader().load(tileTexture)
-            sharedTopTexture.magFilter = NearestFilter
-            sharedTopTexture.minFilter = NearestFilter
-            sharedTopTexture.generateMipmaps = false
-            sharedTopTexture.offset.set(0, 0)
-            sharedTopTexture.repeat.set(0.0625, 1)
+        const geometry = new BufferGeometry()
+        geometry.setAttribute("position", new BufferAttribute(positions, 3))
+        geometry.setAttribute("uv", new BufferAttribute(uvs, 2))
+        geometry.setAttribute("color", new BufferAttribute(colors, 3))
+        geometry.computeVertexNormals()
+
+        this.mesh = new Mesh(geometry, this.terrain.material) as TileMesh
+        this.mesh.parentObject = this
+    }
+
+    private createNumberMesh(): void {
+        if (!baseTexture) {
+            baseTexture = new TextureLoader().load(tileTexture)
+            baseTexture.magFilter = NearestFilter
+            baseTexture.minFilter = NearestFilter
+            baseTexture.generateMipmaps = false
         }
 
-        this.sideMaterial = new MeshPhongMaterial({
-            color: "#64748b",
-            specular: 0x475569,
-            shininess: 20,
-            side: DoubleSide,
-        })
-
-        this.topMaterial = new MeshPhongMaterial({
-            color: "white",
-            specular: 0xffffff,
-            shininess: 10,
-            side: DoubleSide,
-            map: sharedTopTexture,
-            emissive: 0x000000,
-        })
-
-        this.convexMesh = new Mesh(convexGeometry, [this.sideMaterial, this.topMaterial]) as TileMesh
-        this.convexMesh.parentObject = this
-    }
-
-    private createFlatMesh(): void {
-        this.texture = new TextureLoader().load(tileTexture)
+        this.texture = baseTexture.clone()
+        this.texture.needsUpdate = true
         this.texture.magFilter = NearestFilter
         this.texture.minFilter = NearestFilter
         this.texture.generateMipmaps = false
         this.texture.offset.set(0, 0)
         this.texture.repeat.set(0.0625, 1)
 
-        const geometry = new PlaneGeometry(this.scale, this.scale)
-        const material = new MeshPhongMaterial({
-            color: "white",
-            specular: 0x000000,
-            shininess: 0,
+        const geometry = new PlaneGeometry(this.board.tileSize * 0.72, this.board.tileSize * 0.72)
+        const material = new MeshBasicMaterial({
             map: this.texture,
-            polygonOffset: true,
-            polygonOffsetFactor: -1,
-            polygonOffsetUnits: -1,
+            transparent: true,
+            alphaTest: 0.4,
+            depthWrite: false,
         })
 
-        this.flatMesh = new Mesh(geometry, material) as TileMesh
-        this.flatMesh.rotation.x = Math.PI * 3 / 2
-        this.flatMesh.parentObject = this
+        this.numberMesh = new Mesh(geometry, material)
+        // Flat above the highest corner, so the sloped terrain or texture
+        // can never clip into the icon.
+        this.numberMesh.rotation.x = -Math.PI / 2
+        this.numberMesh.position.set(0, this.maxCornerY + 1.5, 0)
+        this.numberMesh.visible = false
+        this.numberMesh.raycast = () => void 0
+        this.mesh.add(this.numberMesh)
     }
 
     public setHover(hovered: boolean): void {
-        if (!this.isOpen() && this.topMaterial) {
-            this.topMaterial.emissive.setHex(hovered ? 0x2a384c : 0x000000)
-            this.sideMaterial.color.set(hovered ? "#94a3b8" : "#64748b")
-        }
+        if (this.opened) return
+        this.fog.setHover(hovered)
     }
 
     public set(name: string | number): void {
@@ -247,6 +177,18 @@ export default class Tile {
             }
         }
         this.texture.offset.x = 0.0625 * num
+        this.updateNumberVisibility()
+    }
+
+    // True when this tile shows a number or a bomb icon.
+    private hasIcon(): boolean {
+        return this.value === "bomb" || (typeof this.value === "number" && this.value >= 1)
+    }
+
+    // The number / bomb icon is only shown once the tile is revealed.
+    private updateNumberVisibility(): void {
+        if (!this.numberMesh) return
+        this.numberMesh.visible = this.opened && this.hasIcon()
     }
 
     public getNeighbours(): Tile[] {
@@ -279,10 +221,7 @@ export default class Tile {
             this.game.startTimer()
         }
 
-        this.setHover(false)
-        this.game.scene.remove(this.mesh)
-        this.mesh = this.flatMesh
-        this.game.scene.add(this.mesh)
+        this.reveal()
 
         if (this.value === "bomb") {
             this.game.addPoints(-250)
@@ -303,6 +242,26 @@ export default class Tile {
         }
     }
 
+    // Show the terrain and clear the fog, without any scoring.
+    // Instant clears the fog at once (used when all bombs are revealed).
+    public reveal(instant = false): void {
+        if (this.opened) return
+        this.setHover(false)
+        this.opened = true
+        if (instant) {
+            this.fog.hideInstant()
+        } else {
+            this.fog.reveal()
+        }
+        this.updateNumberVisibility()
+        // Props would cover the number, so keep them hidden on icon tiles.
+        if (this.hasIcon()) {
+            this.board.decoration?.hide(this)
+        } else {
+            this.board.decoration?.show(this)
+        }
+    }
+
     public openNeighbours(): void {
         for (const neighbour of this.getNeighbours()) {
             if (!neighbour.isOpen() && !neighbour.flag.isVisible()) {
@@ -313,16 +272,15 @@ export default class Tile {
 
     public close(): void {
         this.setHover(false)
-        if (this.isOpen()) {
-            this.game.scene.remove(this.mesh)
-            this.mesh = this.convexMesh
-            this.game.scene.add(this.mesh)
-        }
+        this.opened = false
+        this.updateNumberVisibility()
         this.flag.hide(true)
+        this.fog.reset()
+        this.board.decoration?.hide(this)
         this.set("empty")
     }
 
     public isOpen(): boolean {
-        return this.mesh === this.flatMesh
+        return this.opened
     }
 }

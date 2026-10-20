@@ -26,7 +26,7 @@ export default class Player {
         this.raycaster.setFromCamera(coords, this.game.camera)
         const tileMeshes = this.game.board.tiles.map(tile => tile.mesh)
         const intersects = this.raycaster.intersectObjects(tileMeshes, false)
-        const maxDistance = (this.game.playerController && this.game.playerController.isBirdEye) ? 1200 : 500
+        const maxDistance = (this.game.playerController && this.game.playerController.isBirdEye) ? 2000 : 900
 
         if (intersects.length > 0 && intersects[0].distance < maxDistance) {
             return (intersects[0].object as TileMesh).parentObject || null

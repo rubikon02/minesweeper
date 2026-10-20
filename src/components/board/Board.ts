@@ -1,6 +1,8 @@
 import { Object3D } from 'three'
 import Tile from './Tile'
 import Flag from './Flag'
+import Terrain from './Terrain'
+import Decoration from './Decoration'
 import type Game from '../Game'
 
 export default class Board {
@@ -10,6 +12,9 @@ export default class Board {
     public tileSize: number
     public bombsDensity: number
     public bombsCount: number
+
+    public terrain: Terrain
+    public decoration: Decoration
 
     public tiles: Tile[] = []
     public grid: (Tile | null)[][] = []
@@ -30,7 +35,10 @@ export default class Board {
             this.preloadedFlag = flag
         })
 
+        this.terrain = new Terrain(this, Math.floor(Math.random() * 100000))
         this.generateTiles()
+        this.decoration = new Decoration(this)
+        this.decoration.regenerate(Math.floor(Math.random() * 100000))
     }
 
     public generateTiles(): void {
@@ -103,9 +111,7 @@ export default class Board {
         for (const tile of this.tiles) {
             if (tile.value === "bomb" && !tile.isOpen()) {
                 if (!tile.flag.isVisible()) {
-                    this.game.scene.remove(tile.mesh)
-                    tile.mesh = tile.flatMesh
-                    this.game.scene.add(tile.mesh)
+                    tile.reveal(true)
                 }
             }
         }
@@ -137,6 +143,15 @@ export default class Board {
 
         for (const tile of this.tiles) {
             tile.close()
+        }
+
+        this.decoration.regenerate(Math.floor(Math.random() * 100000))
+    }
+
+    // Tick the fog reveal animations.
+    public update(delta: number): void {
+        for (const tile of this.tiles) {
+            tile.fog.update(delta)
         }
     }
 
