@@ -4,7 +4,6 @@ import {
 } from "three"
 import type Game from './Game'
 import type Tile from './board/Tile'
-import type { TileMesh } from './board/Tile'
 
 export default class Player {
     public game: Game
@@ -20,40 +19,47 @@ export default class Player {
         this.crosshairEl = document.getElementById("crosshair")
     }
 
+    // Raycast the chunk terrain meshes (a handful of objects) and resolve
+    // the hit point back to a grid coordinate.
     public getRaycastTarget(coords: Vector2 = this.mouse): Tile | null {
-        if (!this.game.board || !this.game.board.tiles) return null
+        const board = this.game.board
+        if (!board || !board.chunkManager) return null
+
+        const meshes = board.chunkManager.meshList
+        if (meshes.length === 0) return null
 
         this.raycaster.setFromCamera(coords, this.game.camera)
-        const tileMeshes = this.game.board.tiles.map(tile => tile.mesh)
-        const intersects = this.raycaster.intersectObjects(tileMeshes, false)
-        const maxDistance = (this.game.playerController && this.game.playerController.isBirdEye) ? 2000 : 900
+        const intersects = this.raycaster.intersectObjects(meshes, false)
+        // Chunks only exist around the player, so the distance cap is just a
+        // guard against far-plane noise. It must stay above the highest
+        // camera position (E can raise it to 4000).
+        const maxDistance = 12000
 
         if (intersects.length > 0 && intersects[0].distance < maxDistance) {
-            return (intersects[0].object as TileMesh).parentObject || null
+            const point = intersects[0].point
+            const gx = Math.floor(point.x / board.tileSize)
+            const gz = Math.floor(point.z / board.tileSize)
+            return board.getTile(gx, gz)
         }
         return null
     }
 
     public update(_delta: number): void {
-        if (!this.game.board || !this.game.board.tiles) return
+        const board = this.game.board
+        if (!board) return
 
         const targetTile = this.getRaycastTarget(this.mouse)
+        const targeted = !!targetTile && board.isTileAccessible(targetTile.x, targetTile.z)
 
         if (this.tileLookedAt !== targetTile) {
-            if (this.tileLookedAt && typeof this.tileLookedAt.setHover === 'function') {
-                this.tileLookedAt.setHover(false)
-            }
-            if (targetTile && typeof targetTile.setHover === 'function') {
-                targetTile.setHover(true)
-            }
             this.tileLookedAt = targetTile
+        }
 
-            if (!this.crosshairEl) {
-                this.crosshairEl = document.getElementById("crosshair")
-            }
-            if (this.crosshairEl) {
-                this.crosshairEl.classList.toggle("targeted", targetTile !== null)
-            }
+        if (!this.crosshairEl) {
+            this.crosshairEl = document.getElementById("crosshair")
+        }
+        if (this.crosshairEl) {
+            this.crosshairEl.classList.toggle("targeted", targeted)
         }
     }
 }

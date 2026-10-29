@@ -26,7 +26,7 @@ export default class PlayerController {
     public readonly maxCamHeight = 4000
 
     public isBirdEye = false
-    public savedWalkPos: { x: number; z: number } = { x: 0, z: 240 }
+    public savedWalkPos: { x: number; z: number } = { x: 0, z: 0 }
 
     public keys: Record<string, boolean> = {}
 
@@ -49,27 +49,50 @@ export default class PlayerController {
     public resetPosition(): void {
         this.isBirdEye = false
         this.heightOffset = 0
-        this.savedWalkPos = { x: 0, z: 240 }
-        this.game.camera.position.set(0, this.walkHeight, 240)
-        this.game.camera.lookAt(new Vector3(0, this.walkHeight - 20, 100))
+        const ts = this.game.board.tileSize
+        const cx = ts * 0.5
+        this.savedWalkPos = { x: cx, z: cx }
+        this.game.camera.position.set(cx, this.walkHeight, cx)
+        this.aimAtNearbyGround(cx, cx)
+    }
+
+    // Point the camera at the ground a couple of tiles ahead. The camera sits
+    // high above the terrain, so a shallow pitch would aim past the walkable
+    // area and leave nothing to click.
+    private aimAtNearbyGround(x: number, z: number): void {
+        const board = this.game.board
+        const ts = board.tileSize
+        const targetZ = z - ts * 2
+        const targetY = board.terrain.surfaceY(
+            Math.floor(x / ts),
+            Math.floor(targetZ / ts)
+        )
+        this.game.camera.lookAt(new Vector3(x, targetY, targetZ))
     }
 
     public toggleBirdEye(): void {
         this.isBirdEye = !this.isBirdEye
 
+        const board = this.game.board
+        const centroid = board ? board.getCentroid() : null
+        const cam = this.game.camera
+
         if (this.isBirdEye) {
             // Save ground position
             this.savedWalkPos = {
-                x: this.game.camera.position.x,
-                z: this.game.camera.position.z,
+                x: cam.position.x,
+                z: cam.position.z,
             }
-            // Elevate to fixed bird's-eye view looking down towards board center
-            this.game.camera.position.set(0, this.birdEyeHeight + this.heightOffset, 220)
-            this.game.camera.lookAt(new Vector3(0, 0, 0))
+            // Elevate and aim at the middle of the uncovered region.
+            const tx = centroid ? centroid.x : cam.position.x
+            const tz = centroid ? centroid.z : cam.position.z
+            cam.position.set(tx, this.birdEyeHeight + this.heightOffset, tz + 220)
+            cam.lookAt(new Vector3(tx, 0, tz))
         } else {
-            // Restore ground position with proper forward/downward pitch
-            this.game.camera.position.set(this.savedWalkPos.x, this.walkHeight + this.heightOffset, this.savedWalkPos.z)
-            this.game.camera.lookAt(new Vector3(this.savedWalkPos.x, this.walkHeight + this.heightOffset - 20, this.savedWalkPos.z - 100))
+            // Restore ground position with a proper downward pitch toward
+            // the nearby walkable tiles.
+            cam.position.set(this.savedWalkPos.x, this.walkHeight + this.heightOffset, this.savedWalkPos.z)
+            this.aimAtNearbyGround(this.savedWalkPos.x, this.savedWalkPos.z)
         }
     }
 
@@ -86,6 +109,10 @@ export default class PlayerController {
             ? this.sprintingSpeed
             : this.walkingSpeed
 
+        const cam = this.game.camera
+        const oldX = cam.position.x
+        const oldZ = cam.position.z
+
         if (this.keys["KeyW"] || this.keys["ArrowUp"]) {
             this.controls.moveForward(speed)
         }
@@ -99,13 +126,32 @@ export default class PlayerController {
             this.controls.moveRight(speed)
         }
 
+        // Keep the player near the uncovered area. Try the full move, then
+        // each axis on its own, so sliding along the edge still works.
+        // In bird's-eye mode the camera is free to move.
+        if (!this.isBirdEye) {
+            const board = this.game.board
+            const nx = cam.position.x
+            const nz = cam.position.z
+            if (!board.isWorldAccessible(nx, nz)) {
+                if (board.isWorldAccessible(nx, oldZ)) {
+                    cam.position.z = oldZ
+                } else if (board.isWorldAccessible(oldX, nz)) {
+                    cam.position.x = oldX
+                } else {
+                    cam.position.x = oldX
+                    cam.position.z = oldZ
+                }
+            }
+        }
+
         // E raises the camera, Q lowers it. Clamp to a sane range.
         const raise = (this.keys["KeyE"] ? 1 : 0) - (this.keys["KeyQ"] ? 1 : 0)
         this.heightOffset += raise * this.verticalSpeed * delta
         this.heightOffset = Math.max(-3000, Math.min(3000, this.heightOffset))
 
         const baseHeight = (this.isBirdEye ? this.birdEyeHeight : this.walkHeight) + this.heightOffset
-        this.game.camera.position.y = Math.max(this.minCamHeight, Math.min(this.maxCamHeight, baseHeight))
+        cam.position.y = Math.max(this.minCamHeight, Math.min(this.maxCamHeight, baseHeight))
 
         this.player.update(delta)
     }
@@ -141,13 +187,16 @@ export default class PlayerController {
                 return
             }
 
-            // Only interact when controls are already locked
+            // Only interact with tiles inside the walkable area.
             if (this.player.tileLookedAt) {
+                const tile = this.player.tileLookedAt
+                if (!this.game.board.isTileAccessible(tile.x, tile.z)) return
+
                 if (e.button === 0) {
-                    this.player.tileLookedAt.open()
+                    tile.open()
                 }
                 if (e.button === 2) {
-                    this.player.tileLookedAt.toggleFlag()
+                    tile.toggleFlag()
                 }
             }
         })

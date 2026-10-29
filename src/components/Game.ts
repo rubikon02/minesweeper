@@ -11,7 +11,7 @@ import {
     CanvasTexture
 } from 'three'
 import Renderer from './Renderer'
-import Floor from './board/Floor'
+import Horizon from './board/Horizon'
 import Board from './board/Board'
 import Player from './Player'
 import PlayerController from './PlayerController'
@@ -41,7 +41,7 @@ export default class Game {
     public camera!: PerspectiveCamera
     public renderer!: Renderer
     public clock!: Clock
-    public floor!: Floor
+    public horizon!: Horizon
     public board!: Board
     public player!: Player
     public playerController!: PlayerController
@@ -82,13 +82,13 @@ export default class Game {
         this.scene.add(dirLight)
 
         const aspect = window.innerWidth / window.innerHeight
-        this.camera = new PerspectiveCamera(75, aspect, 1, 4000)
+        // Far plane reaches past the horizon ring so it never clips.
+        this.camera = new PerspectiveCamera(75, aspect, 1, 12000)
         this.scene.add(this.camera)
 
-        this.floor = new Floor(700, 700)
-        this.scene.add(this.floor)
-
         this.board = new Board(this)
+        this.horizon = new Horizon(this.board)
+        // this.scene.add(this.horizon)
 
         this.player = new Player(this)
         this.playerController = new PlayerController(this)
@@ -138,21 +138,19 @@ export default class Game {
 
     public onFlagPlaced(tile: Tile): void {
         this.flagsPlaced++
-        if (tile.value === "bomb") {
+        this.board.addFlag(tile.x, tile.z)
+        if (tile.value === "bomb" || this.board.isBomb(tile.x, tile.z)) {
             this.addPoints(50)
         } else {
             this.addPoints(-75)
         }
         this.updateHUD()
-
-        if (this.board.checkWin()) {
-            this.gameWon()
-        }
     }
 
     public onFlagRemoved(tile: Tile): void {
         this.flagsPlaced = Math.max(0, this.flagsPlaced - 1)
-        if (tile.value === "bomb") {
+        this.board.removeFlag(tile.x, tile.z)
+        if (tile.value === "bomb" || this.board.isBomb(tile.x, tile.z)) {
             this.addPoints(-50)
         } else {
             this.addPoints(75)
@@ -168,8 +166,7 @@ export default class Game {
 
         const minesEl = document.getElementById("minesCount")
         if (minesEl && this.board) {
-            const remaining = Math.max(0, this.board.bombsCount - this.flagsPlaced)
-            minesEl.innerText = `${remaining} / ${this.board.bombsCount}`
+            minesEl.innerText = `${this.board.opened.size}`
         }
 
         const timeEl = document.getElementById("timeCount")
@@ -188,19 +185,6 @@ export default class Game {
         }
 
         this.showPopup("💥 GAME OVER", "You triggered a mine!", "#ef4444")
-    }
-
-    public gameWon(): void {
-        this.stopTimer()
-        this.board.blockActions = true
-        this.board.flagAllBombs()
-        this.addPoints(500)
-
-        if (this.playerController && this.playerController.controls) {
-            this.playerController.controls.unlock()
-        }
-
-        this.showPopup("🎉 VICTORY!", "You safely cleared the entire minefield!", "#22c55e")
     }
 
     public showPopup(title: string, subtitle: string, accentColor: string): void {
@@ -236,8 +220,8 @@ export default class Game {
                 <span class="value">${this.timer}s</span>
             </div>
             <div class="popup-stat-box">
-                <span class="label">Flags Placed</span>
-                <span class="value">${this.flagsPlaced} / ${this.board.bombsCount}</span>
+                <span class="label">Tiles Cleared</span>
+                <span class="value">${this.board.opened.size}</span>
             </div>
         `
         card.appendChild(statsGrid)
@@ -262,6 +246,7 @@ export default class Game {
         this.flagsPlaced = 0
 
         this.board.restart()
+        this.horizon.reseed()
         this.playerController.resetPosition()
         this.updateHUD()
 
@@ -272,7 +257,8 @@ export default class Game {
     public render(): void {
         const delta = this.clock.getDelta()
         this.playerController.update(delta)
-        this.board.update(delta)
+        this.board.update(this.camera.position.x, this.camera.position.z, delta)
+        this.horizon.update(this.camera.position.x, this.camera.position.z)
         this.renderer.render(this.scene, this.camera)
         requestAnimationFrame(this.render.bind(this))
     }

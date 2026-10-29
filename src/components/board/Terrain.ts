@@ -57,31 +57,29 @@ function createDetailTexture(seed: number): Texture {
     return texture
 }
 
-// Terrain builds one height value per grid corner. Neighbouring tiles
-// share corners, so their surfaces always meet without gaps or cracks.
+// Terrain exposes one height value per grid corner as a pure function of
+// the coordinate. It is procedural, so it works for any coordinate on the
+// infinite board. Values are memoised to keep per-frame cost low.
 export default class Terrain {
     public board: Board
-    public width: number
-    public height: number
     public tileSize: number
 
     // Height range of the mountains.
     public minHeight = 8
     public maxHeight = 210
 
-    // Corner heights: cornerHeights[x][z], size (width + 1) x (height + 1).
-    public cornerHeights: number[][] = []
-
     public material: MeshStandardMaterial
 
+    public seed: number
     private noise2D: (x: number, y: number) => number
     private noiseScale = 0.03
+    private cache = new Map<number, number>()
+    private static readonly CACHE_LIMIT = 400000
 
     constructor(board: Board, seed: number = 1337) {
         this.board = board
-        this.width = board.width
-        this.height = board.height
         this.tileSize = board.tileSize
+        this.seed = seed
 
         this.noise2D = createNoise2D(mulberry32(seed))
 
@@ -96,29 +94,43 @@ export default class Terrain {
             metalness: 0,
             map: sharedDetailTexture,
         })
-
-        this.buildHeights()
     }
 
-    private buildHeights(): void {
-        this.cornerHeights = []
-        for (let x = 0; x <= this.width; x++) {
-            this.cornerHeights[x] = []
-            for (let z = 0; z <= this.height; z++) {
-                const nx = x * this.noiseScale
-                const nz = z * this.noiseScale
+    // Change the seed, giving a completely new landscape.
+    public reseed(seed: number): void {
+        this.seed = seed
+        this.noise2D = createNoise2D(mulberry32(seed))
+        this.cache.clear()
+    }
 
-                // Smooth rolling shape plus sharp ridged peaks.
-                const base = this.fbm(nx, nz) * 0.5 + 0.5
-                const ridge = this.ridged(nx, nz)
-                let t = base * 0.5 + (ridge - 0.3)
-                t = Math.max(0, Math.min(1, t))
-                // Push the peaks up so the mountains read as tall.
-                t = Math.pow(t, 1.3)
+    private key(gx: number, gz: number): number {
+        return (gx + 131072) * 262144 + (gz + 131072)
+    }
 
-                this.cornerHeights[x][z] = this.minHeight + t * (this.maxHeight - this.minHeight)
-            }
+    // Height of a single grid corner. Pure function of the coordinate.
+    public heightAt(gx: number, gz: number): number {
+        const k = this.key(gx, gz)
+        const cached = this.cache.get(k)
+        if (cached !== undefined) return cached
+
+        const nx = gx * this.noiseScale
+        const nz = gz * this.noiseScale
+
+        // Smooth rolling shape plus sharp ridged peaks.
+        const base = this.fbm(nx, nz) * 0.5 + 0.5
+        const ridge = this.ridged(nx, nz)
+        let t = base * 0.5 + (ridge - 0.3)
+        t = Math.max(0, Math.min(1, t))
+        // Push the peaks up so the mountains read as tall.
+        t = Math.pow(t, 1.3)
+
+        const h = this.minHeight + t * (this.maxHeight - this.minHeight)
+
+        if (this.cache.size > Terrain.CACHE_LIMIT) {
+            this.cache.clear()
         }
+        this.cache.set(k, h)
+        return h
     }
 
     private fbm(x: number, z: number): number {
@@ -151,17 +163,14 @@ export default class Terrain {
         return sum / norm
     }
 
-    public heightAt(x: number, z: number): number {
-        return this.cornerHeights[x][z]
-    }
-
-    // World position of a corner along the X / Z axis (board is centred on 0).
+    // World position of a corner along the X / Z axis.
+    // The board is unbounded, so the origin sits at grid coordinate 0.
     public cornerWorldX(x: number): number {
-        return x * this.tileSize - this.width * this.tileSize / 2
+        return x * this.tileSize
     }
 
     public cornerWorldZ(z: number): number {
-        return z * this.tileSize - this.height * this.tileSize / 2
+        return z * this.tileSize
     }
 
     // The four corner heights of one tile, in order:
@@ -184,16 +193,14 @@ export default class Terrain {
     // Exact ground height under a world position, matching the tile
     // triangles. Used so objects sit on the slope instead of floating.
     public heightAtWorld(worldX: number, worldZ: number): number {
-        const gx = (worldX + this.width * this.tileSize / 2) / this.tileSize
-        const gz = (worldZ + this.height * this.tileSize / 2) / this.tileSize
+        const gx = worldX / this.tileSize
+        const gz = worldZ / this.tileSize
 
-        let x0 = Math.floor(gx)
-        let z0 = Math.floor(gz)
-        x0 = Math.max(0, Math.min(this.width - 1, x0))
-        z0 = Math.max(0, Math.min(this.height - 1, z0))
+        const x0 = Math.floor(gx)
+        const z0 = Math.floor(gz)
 
-        const u = Math.max(0, Math.min(1, gx - x0))
-        const v = Math.max(0, Math.min(1, gz - z0))
+        const u = gx - x0
+        const v = gz - z0
 
         const ha = this.heightAt(x0, z0)
         const hb = this.heightAt(x0 + 1, z0)

@@ -115,8 +115,10 @@ export default class Flag {
     public setPosition(): void {
         if (!this.mesh) return
 
-        this.mesh.position.x = this.board.tileSize * this.x - this.board.width * this.board.tileSize / 2 + this.board.tileSize / 2
-        this.mesh.position.z = this.board.tileSize * this.z - this.board.height * this.board.tileSize / 2 + this.board.tileSize / 2
+        // Infinite board: grid coordinate 0 sits at world 0, so the tile
+        // centre is just (x + 0.5) tiles along each axis.
+        this.mesh.position.x = this.tile.worldX
+        this.mesh.position.z = this.tile.worldZ
         this.mesh.position.y = this.board.terrain.heightAtWorld(this.mesh.position.x, this.mesh.position.z)
     }
 

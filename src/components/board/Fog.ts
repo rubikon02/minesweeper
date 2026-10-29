@@ -1,6 +1,4 @@
 import {
-    Mesh,
-    MeshStandardMaterial,
     Texture,
     CanvasTexture,
     RepeatWrapping,
@@ -8,10 +6,9 @@ import {
 } from 'three'
 
 import mulberry32 from '../../utils/random'
-import type Tile from './Tile'
 
 // One shared cloud texture, drawn onto a canvas so we do not need to
-// download anything extra.
+// download anything extra. Every chunk's fog material uses the same map.
 let sharedCloudTexture: Texture | null = null
 
 function createCloudTexture(): Texture {
@@ -68,88 +65,9 @@ function createCloudTexture(): Texture {
     return texture
 }
 
-// Fog covers a hidden tile by drawing a cloud texture over its surface.
-// The cover mesh reuses the tile geometry, so it follows the terrain
-// shape and neighbouring tiles form one continuous cloud slope.
-export default class Fog {
-    public tile: Tile
-    public mesh: Mesh
-    public visible: boolean
-
-    private material: MeshStandardMaterial
-    private progress = 0
-    private hovered = false
-
-    private static readonly REVEAL_TIME = 0.35
-    // Small lift above the terrain to avoid z-fighting.
-    private static readonly LIFT = 0.4
-
-    constructor(tile: Tile) {
-        this.tile = tile
-
-        if (!sharedCloudTexture) {
-            sharedCloudTexture = createCloudTexture()
-        }
-
-        this.material = new MeshStandardMaterial({
-            color: 0xffffff,
-            map: sharedCloudTexture,
-            roughness: 1,
-            metalness: 0,
-            transparent: true,
-            opacity: 1,
-        })
-
-        this.mesh = new Mesh(tile.mesh.geometry, this.material)
-        this.mesh.position.set(tile.worldX, Fog.LIFT, tile.worldZ)
-        // Fog is only visual; never let it capture the click ray.
-        this.mesh.raycast = () => void 0
-
-        tile.game.scene.add(this.mesh)
-        this.visible = true
+export function getCloudTexture(): Texture {
+    if (!sharedCloudTexture) {
+        sharedCloudTexture = createCloudTexture()
     }
-
-    public setHover(hovered: boolean): void {
-        if (this.hovered === hovered) return
-        this.hovered = hovered
-        this.material.color.set(hovered ? 0xffffff : 0xe8eef7)
-    }
-
-    // Animate the cover away.
-    public reveal(): void {
-        this.progress = 0.0001
-        this.visible = true
-        this.mesh.visible = true
-    }
-
-    // Clear the cover instantly (win / reveal all bombs).
-    public hideInstant(): void {
-        this.progress = 0
-        this.visible = false
-        this.mesh.visible = false
-    }
-
-    // Bring the cover back instantly (restart).
-    public reset(): void {
-        this.progress = 0
-        this.visible = true
-        this.mesh.visible = true
-        this.material.opacity = 1
-        this.setHover(false)
-    }
-
-    public update(delta: number): void {
-        if (!this.visible || this.progress <= 0) return
-
-        this.progress = Math.min(1, this.progress + delta / Fog.REVEAL_TIME)
-        const eased = this.progress * this.progress
-
-        this.material.opacity = 1 - eased
-        this.mesh.position.y = Fog.LIFT + 8 * eased
-
-        if (this.progress >= 1) {
-            this.visible = false
-            this.mesh.visible = false
-        }
-    }
+    return sharedCloudTexture
 }
