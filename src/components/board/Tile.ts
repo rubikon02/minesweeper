@@ -38,7 +38,7 @@ export default class Tile {
         this.flag = new Flag(this)
     }
 
-    // True when this tile shows a bloom marker or a bomb pod.
+    // True when this tile shows a bloom marker or a bomb mushroom.
     public hasMarker(): boolean {
         return this.value === 'bomb' || (typeof this.value === 'number' && this.value >= 1)
     }

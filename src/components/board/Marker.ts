@@ -10,8 +10,8 @@ import {
 import mulberry32 from '../../utils/random'
 
 // A marker is the landscape decoration on a revealed tile: a bloom plant for
-// a number, a spiky seed pod for a bomb. Geometry is built per chunk and
-// merged into one vertex-coloured mesh, so a whole chunk costs one draw call.
+// a number, spore litter for a bomb. The bomb's mushroom body is an instanced
+// model owned by BombMushroom, so this module only carries the litter.
 export interface MarkerEntry {
     value: string | number
     worldX: number
@@ -39,11 +39,15 @@ const RIM = new Color(0x241d17)
 const STEM = new Color(0x2f6b2a)
 const LEAF = new Color(0x3f8a35)
 
-const POD = new Color(0x1b1418)
-const POD_HI = new Color(0x2b2026)
+// Spore litter under a bomb mushroom. The ember red keeps the bomb readable
+// on snow and dark rock, the same role the old pod seam played.
 const EMBER = new Color(0xd0442a)
 
 const UP = new Vector3(0, 1, 0)
+
+// Blooms are the long-range number cue, so make the heads slightly larger than
+// the rest of the plant.
+const BLOOM_SCALE = 1.6
 
 let material: MeshStandardMaterial | null = null
 const colorCache = new Map<number, Color>()
@@ -121,7 +125,7 @@ export function buildMarkerGeometry(
         const baseY = sampleHeight(entry.worldX, entry.worldZ)
 
         if (entry.value === 'bomb') {
-            addBombPod(builder, localX, baseY, localZ)
+            addSporeLitter(builder, localX, localZ, entry.worldX, entry.worldZ, sampleHeight)
             continue
         }
 
@@ -155,9 +159,9 @@ function addBloomPlant(
             outward: new Vector3(),
         })
     } else {
-        // One even ring. Spacing stays roughly 4 units, so eight blooms fit
-        // inside the plant footprint without overlapping.
-        const spacing = 4
+        // One even ring. Spacing keeps the enlarged bloom heads inside the
+        // plant footprint without overlapping.
+        const spacing = 4 * BLOOM_SCALE
         const radius = spacing / (2 * Math.sin(Math.PI / count))
         for (let i = 0; i < count; i++) {
             const angle = -Math.PI / 2 + (i * Math.PI * 2) / count
@@ -180,7 +184,14 @@ function addBloomPlant(
         addBloomHead(builder, head.center, head.outward, petal)
     }
 
-    addPetalLitter(builder, petal, localX, localZ, worldX, worldZ, sampleHeight)
+    addLitter(builder, localX, localZ, worldX, worldZ, sampleHeight, {
+        color: shaded(petal, 0.92),
+        count: 9,
+        innerRadius: 1.8,
+        spread: 3.2,
+        minSize: 0.5,
+        sizeRange: 0.35,
+    })
 }
 
 // A bloom head is a low-poly disc: a dark rim, six petals and a cream centre.
@@ -215,7 +226,7 @@ function addBloomHead(
     // Dark disc under the petals, a little wider than the petals so a thin
     // rim stays visible against pale terrain.
     const rimSegments = 10
-    const rimRadius = 1.9
+    const rimRadius = 1.9 * BLOOM_SCALE
     for (let i = 0; i < rimSegments; i++) {
         const a0 = (i * Math.PI * 2) / rimSegments
         const a1 = ((i + 1) * Math.PI * 2) / rimSegments
@@ -224,13 +235,14 @@ function addBloomHead(
 
     const petals = 6
     const half = Math.PI / petals
+    const petalLift = 0.045 * BLOOM_SCALE
     for (let i = 0; i < petals; i++) {
         const angle = (i * Math.PI * 2) / petals
-        const innerL = surface(0.58, angle - half * 0.5, 0.045)
-        const innerR = surface(0.58, angle + half * 0.5, 0.045)
-        const outerL = surface(1.5, angle - half * 0.82, 0.045)
-        const outerR = surface(1.5, angle + half * 0.82, 0.045)
-        const tip = surface(1.78, angle, 0.045)
+        const innerL = surface(0.58 * BLOOM_SCALE, angle - half * 0.5, petalLift)
+        const innerR = surface(0.58 * BLOOM_SCALE, angle + half * 0.5, petalLift)
+        const outerL = surface(1.5 * BLOOM_SCALE, angle - half * 0.82, petalLift)
+        const outerR = surface(1.5 * BLOOM_SCALE, angle + half * 0.82, petalLift)
+        const tip = surface(1.78 * BLOOM_SCALE, angle, petalLift)
 
         builder.tri(innerL, outerL, tip, petal)
         builder.tri(innerL, tip, outerR, petal)
@@ -238,13 +250,14 @@ function addBloomHead(
     }
 
     const centerSegments = 8
+    const centerLift = 0.1 * BLOOM_SCALE
     for (let i = 0; i < centerSegments; i++) {
         const a0 = (i * Math.PI * 2) / centerSegments
         const a1 = ((i + 1) * Math.PI * 2) / centerSegments
         builder.tri(
-            center.clone().addScaledVector(normal, 0.1),
-            surface(0.72, a0, 0.1),
-            surface(0.72, a1, 0.1),
+            center.clone().addScaledVector(normal, centerLift),
+            surface(0.72 * BLOOM_SCALE, a0, centerLift),
+            surface(0.72 * BLOOM_SCALE, a1, centerLift),
             CREAM
         )
     }
@@ -298,16 +311,26 @@ function addLeaves(builder: MeshBuilder, base: Vector3): void {
     }
 }
 
-// Fallen petals are the long-range colour cue. Their vertices are sampled
-// against the terrain, so each petal follows the slope instead of hovering.
-function addPetalLitter(
+// One flake of ground debris. Litter is the long-range colour cue for a
+// marker, so its vertices are sampled against the terrain and each flake
+// follows the slope instead of hovering.
+interface LitterOptions {
+    color: Color
+    count: number
+    innerRadius: number
+    spread: number
+    minSize: number
+    sizeRange: number
+}
+
+function addLitter(
     builder: MeshBuilder,
-    petal: Color,
     localX: number,
     localZ: number,
     worldX: number,
     worldZ: number,
-    sampleHeight: HeightSampler
+    sampleHeight: HeightSampler,
+    options: LitterOptions
 ): void {
     const seed = (
         Math.imul(Math.floor(worldX), 73856093) ^
@@ -315,16 +338,14 @@ function addPetalLitter(
         0x9e3779b9
     ) >>> 0
     const rng = mulberry32(seed)
-    const color = shaded(petal, 0.92)
-    const count = 9
 
-    for (let i = 0; i < count; i++) {
+    for (let i = 0; i < options.count; i++) {
         const angle = rng() * Math.PI * 2
-        const radius = 1.8 + rng() * 3.2
+        const radius = options.innerRadius + rng() * options.spread
         const px = Math.cos(angle) * radius
         const pz = Math.sin(angle) * radius
         const rotation = rng() * Math.PI * 2
-        const size = 0.5 + rng() * 0.35
+        const size = options.minSize + rng() * options.sizeRange
         const fx = Math.cos(rotation)
         const fz = Math.sin(rotation)
         const rx = -fz
@@ -341,69 +362,26 @@ function addPetalLitter(
             sampleHeight(worldX + ox, worldZ + oz) + 0.18,
             localZ + oz
         ))
-        builder.quad(vertices[0], vertices[1], vertices[2], vertices[3], color)
+        builder.quad(vertices[0], vertices[1], vertices[2], vertices[3], options.color)
     }
 }
 
-// Bomb pod: a near-black faceted body with ember seams and outward spikes.
-// Deliberately not a flower and with no petal litter, so it cannot be read as
-// a number even at a distance.
-function addBombPod(builder: MeshBuilder, localX: number, baseY: number, localZ: number): void {
-    const center = new Vector3(localX, baseY, localZ)
-    const segments = 7
-    const ringRadius = 3.2
-    const ringY = baseY + 8
-    const top = new Vector3(localX, baseY + 19, localZ)
-    const bottom = new Vector3(localX, baseY + 2, localZ)
-
-    const ring: Vector3[] = []
-    for (let i = 0; i < segments; i++) {
-        const angle = (i * Math.PI * 2) / segments
-        ring.push(new Vector3(
-            localX + Math.cos(angle) * ringRadius,
-            ringY,
-            localZ + Math.sin(angle) * ringRadius
-        ))
-    }
-    for (let i = 0; i < segments; i++) {
-        const next = (i + 1) % segments
-        builder.tri(ring[i], ring[next], top, POD)
-        builder.tri(ring[next], ring[i], bottom, POD)
-    }
-
-    // Thin decorative ember band around the widest part.
-    const seamRadius = 3.28
-    const seamLow = baseY + 8.3
-    const seamHigh = baseY + 8.9
-    for (let i = 0; i < segments; i++) {
-        const a0 = (i * Math.PI * 2) / segments
-        const a1 = ((i + 1) * Math.PI * 2) / segments
-        const p0 = new Vector3(localX + Math.cos(a0) * seamRadius, seamLow, localZ + Math.sin(a0) * seamRadius)
-        const p1 = new Vector3(localX + Math.cos(a1) * seamRadius, seamLow, localZ + Math.sin(a1) * seamRadius)
-        const q1 = new Vector3(localX + Math.cos(a1) * seamRadius, seamHigh, localZ + Math.sin(a1) * seamRadius)
-        const q0 = new Vector3(localX + Math.cos(a0) * seamRadius, seamHigh, localZ + Math.sin(a0) * seamRadius)
-        builder.quad(p0, p1, q1, q0, EMBER)
-    }
-
-    const spikes = 7
-    for (let i = 0; i < spikes; i++) {
-        const angle = (i * Math.PI * 2) / spikes + 0.15
-        const outward = new Vector3(Math.cos(angle), 0, Math.sin(angle))
-        const tangent = new Vector3(-outward.z, 0, outward.x)
-        const baseCenter = center.clone()
-            .addScaledVector(outward, 2.8)
-            .add(new Vector3(0, 9.5, 0))
-        const tip = center.clone()
-            .addScaledVector(outward, 5.8)
-            .add(new Vector3(0, 12.2 + (i % 2) * 1.4, 0))
-
-        const p0 = baseCenter.clone().addScaledVector(tangent, 1).add(new Vector3(0, 0.9, 0))
-        const p1 = baseCenter.clone().addScaledVector(tangent, -1).add(new Vector3(0, 0.9, 0))
-        const p2 = baseCenter.clone().addScaledVector(outward, -0.8)
-
-        builder.tri(p0, p1, tip, POD_HI)
-        builder.tri(p1, p2, tip, POD_HI)
-        builder.tri(p2, p0, tip, POD_HI)
-        builder.tri(p0, p2, p1, POD)
-    }
+// Spores around the base of a bomb mushroom. No count is encoded: like petal
+// litter, this is a colour cue only.
+function addSporeLitter(
+    builder: MeshBuilder,
+    localX: number,
+    localZ: number,
+    worldX: number,
+    worldZ: number,
+    sampleHeight: HeightSampler
+): void {
+    addLitter(builder, localX, localZ, worldX, worldZ, sampleHeight, {
+        color: shaded(EMBER, 0.92),
+        count: 8,
+        innerRadius: 1.4,
+        spread: 4.4,
+        minSize: 0.35,
+        sizeRange: 0.35,
+    })
 }

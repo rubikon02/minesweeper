@@ -52,8 +52,9 @@ Entry: `src/index.ts` mounts `Game` into `#root`.
   farther ones, owns `meshList` for raycasting.
 - `src/components/board/Chunk.ts` — one merged terrain mesh, one merged fog
   mesh with a per-chunk reveal mask (`DataTexture`, 255 hidden / 0 shown),
-  one merged marker mesh, and instanced decoration. All geometry is local to
-  the chunk origin; the chunk group carries the world offset.
+  one merged marker mesh, instanced decoration, and instanced bomb mushrooms.
+  All geometry is local to the chunk origin; the chunk group carries the world
+  offset.
 - `src/components/board/Tile.ts` — logical tile only: value, open state,
   flag. Value comes from `Board.isBomb`; markers are registered on the chunk.
   Empty tiles flood-open iteratively.
@@ -63,13 +64,21 @@ Entry: `src/index.ts` mounts `Game` into `#root`.
 - `src/components/board/Decoration.ts` — loads GLB nature models, builds
   `InstancedMesh` props per chunk, hides props on unrevealed tiles. Props
   rebuild after async load via `onReady -> chunkManager.rebuildDecorations()`.
+- `src/components/board/InstancedProp.ts` — shared instanced-model seam:
+  `collectModelParts` flattens a loaded GLB into root-relative parts,
+  `prepareNatureModel` fixes the kit's metallic materials, `DecoInstance`
+  places one part across every `InstancedMesh` of its template.
 - `src/components/board/Flag.ts` — preloads `flag.obj`/`flag.mtl`, clones per
   tile, hides with chunk disposal, falls back to a primitive pole/cone.
 - `src/components/board/Fog.ts` — shared cloud canvas texture.
 - `src/components/board/Marker.ts` — procedural low-poly tile markers:
-  bloom plants for numbers, seed pods for bombs. `buildMarkerGeometry` is the
-  pure seam (entries + height sampler + chunk origin in, merged vertex-colored
-  geometry out); all chunks share one flat-shaded `MeshStandardMaterial`.
+  bloom plants for numbers, spore litter for bombs. `buildMarkerGeometry` is
+  the pure seam (entries + height sampler + chunk origin in, merged
+  vertex-colored geometry out); all chunks share one flat-shaded
+  `MeshStandardMaterial`.
+- `src/components/board/BombMushroom.ts` — loads the bomb mushroom GLB and
+  builds one `InstancedMesh` per model part per chunk for revealed bomb tiles.
+  Eager load; no fallback, so a failed load leaves bomb tiles bare.
 - `src/components/board/Horizon.ts` — coarse far-terrain mesh from the same
   height function.
 - `src/utils/coords.ts` — `CHUNK_SIZE = 16`, `CHUNK_RADIUS = 3`,
@@ -119,6 +128,10 @@ Entry: `src/index.ts` mounts `Game` into `#root`.
 - Asset imports rely on declarations in `src/vite-env.d.ts` and
   `assetsInclude` in `vite.config.ts`. Add both for new extensions.
 - Bird's-eye mode frees movement from the accessible-area clamp.
+- `mushroom_bomb.glb` is Y-up only through its node rotation; the geometry
+  itself is Z-up. Do not add another rotation. The model is scaled to
+  `HEIGHT` at load, so authored units and pivot do not matter, but the
+  fallback-free load means a missing asset shows no bomb marker at all.
 
 ## Boundaries
 

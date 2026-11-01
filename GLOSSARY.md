@@ -16,12 +16,14 @@ canonical color as the plant. Petal litter is the long-range color cue: it
 identifies the number by color when the individual blooms are too small to
 count. It does not encode a second count.
 
-## Bomb pod
+## Bomb mushroom
 
-The marker on a revealed bomb tile. A dark, spiky seed pod with a decorative
-ember-red seam. Bombs are revealed only when the game ends, so the pod is
-decorative and has no distance cue. It is deliberately not a flower, so it
-cannot be mistaken for a bloom marker.
+The marker on a revealed bomb tile. A large red-capped mushroom, roughly three
+quarters of a tile wide and clearly taller than any bloom plant, standing in
+red spore litter. The litter is a readability cue, not a count. Bombs are
+revealed only when the game ends, so the mushroom is decorative and has no
+distance count cue. It is deliberately not a flower, so it cannot be mistaken
+for a bloom marker.
 
 ## Bomb reveal
 

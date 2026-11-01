@@ -3,6 +3,7 @@ import Flag from './Flag'
 import type Chunk from './Chunk'
 import Terrain from './Terrain'
 import Decoration from './Decoration'
+import BombMushroom from './BombMushroom'
 import ChunkManager from './ChunkManager'
 import { hash2, packKey, ACCESS_MARGIN } from '../../utils/coords'
 import type Game from '../Game'
@@ -18,6 +19,7 @@ export default class Board {
 
     public terrain: Terrain
     public decoration: Decoration
+    public bombMushroom: BombMushroom
     public chunkManager: ChunkManager
 
     public opened = new Set<number>()
@@ -54,6 +56,14 @@ export default class Board {
         this.decoration = new Decoration(this)
         this.decoration.setSeed(this.seed)
         this.decoration.onReady = () => this.chunkManager.rebuildDecorations()
+
+        // Loaded eagerly so the end-of-game reveal never pops in.
+        this.bombMushroom = new BombMushroom(this)
+        this.bombMushroom.onReady = () => {
+            for (const chunk of this.chunkManager.chunks.values()) {
+                chunk.refreshMarkers()
+            }
+        }
 
         this.chunkManager = new ChunkManager(this)
 

@@ -1,16 +1,14 @@
 import {
     Object3D,
-    Mesh,
-    Material,
-    BufferGeometry,
     InstancedMesh,
-    Matrix4,
     Vector3
 } from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 
 import mulberry32 from '../../utils/random'
 import { packKey } from '../../utils/coords'
+import DecoInstance, { collectModelParts, prepareNatureModel } from './InstancedProp'
+import type { Part } from './InstancedProp'
 import treeA from '../../assets/nature/tree_default.glb'
 import treeB from '../../assets/nature/tree_pineDefaultA.glb'
 import treeC from '../../assets/nature/tree_pineSmallA.glb'
@@ -46,67 +44,6 @@ const SOURCES: ModelSource[] = [
     { kind: 'bush', url: plantA },
     { kind: 'grass', url: grassA },
 ]
-
-// One part of a template model (a single mesh inside the GLB).
-interface Part {
-    geometry: BufferGeometry
-    material: Material | Material[]
-    matrix: Matrix4
-}
-
-const dummy = new Object3D()
-const baseMatrix = new Matrix4()
-const finalMatrix = new Matrix4()
-
-// One placed prop. It maps to the same instance index across every
-// InstancedMesh used by its template, so visibility is one matrix write
-// per part instead of cloning whole object trees.
-export class DecoInstance {
-    private meshes: InstancedMesh[]
-    private parts: Matrix4[]
-    private index: number
-    private position: Vector3
-    private rotationY: number
-    private scale: number
-    private visible = false
-
-    constructor(
-        meshes: InstancedMesh[],
-        parts: Matrix4[],
-        index: number,
-        position: Vector3,
-        rotationY: number,
-        scale: number
-    ) {
-        this.meshes = meshes
-        this.parts = parts
-        this.index = index
-        this.position = position
-        this.rotationY = rotationY
-        this.scale = scale
-        this.apply()
-    }
-
-    public setVisible(visible: boolean): void {
-        if (visible === this.visible) return
-        this.visible = visible
-        this.apply()
-    }
-
-    private apply(): void {
-        dummy.position.copy(this.position)
-        dummy.rotation.set(0, this.rotationY, 0)
-        dummy.scale.setScalar(this.visible ? this.scale : 0)
-        dummy.updateMatrix()
-        baseMatrix.copy(dummy.matrix)
-
-        for (let i = 0; i < this.meshes.length; i++) {
-            finalMatrix.multiplyMatrices(baseMatrix, this.parts[i])
-            this.meshes[i].setMatrixAt(this.index, finalMatrix)
-            this.meshes[i].instanceMatrix.needsUpdate = true
-        }
-    }
-}
 
 // Scatters nature models over the terrain using shared InstancedMeshes per
 // chunk. Props stay hidden until the tile below them is revealed.
@@ -150,29 +87,7 @@ export default class Decoration {
                 source.url,
                 gltf => {
                     const object = gltf.scene
-                    // Nature kit materials are fully metallic by default,
-                    // which looks dark without an environment map.
-                    object.traverse(child => {
-                        const mesh = child as Mesh
-                        if (mesh.isMesh && mesh.material) {
-                            const fix = (m: Material) => {
-                                const std = m as unknown as { metalness?: number, roughness?: number }
-                                if ('metalness' in std) {
-                                    std.metalness = 0
-                                    std.roughness = 0.9
-                                }
-                                return m
-                            }
-                            if (Array.isArray(mesh.material)) {
-                                mesh.material = mesh.material.map(fix)
-                            } else {
-                                mesh.material = fix(mesh.material)
-                            }
-                            mesh.castShadow = false
-                            mesh.receiveShadow = false
-                        }
-                    })
-
+                    prepareNatureModel(object)
                     this.registerTemplate(source.kind, object)
                     finish()
                 },
@@ -186,18 +101,7 @@ export default class Decoration {
     }
 
     private registerTemplate(kind: Kind, object: Object3D): void {
-        object.updateMatrixWorld(true)
-        const rootInverse = new Matrix4().copy(object.matrixWorld).invert()
-        const parts: Part[] = []
-
-        object.traverse(child => {
-            const mesh = child as Mesh
-            if (mesh.isMesh && mesh.geometry) {
-                const matrix = new Matrix4().multiplyMatrices(rootInverse, mesh.matrixWorld)
-                parts.push({ geometry: mesh.geometry, material: mesh.material, matrix })
-            }
-        })
-
+        const parts = collectModelParts(object)
         if (parts.length > 0) {
             this.prototypes.set(object, parts)
             this.templates.push({ kind, object })
@@ -276,7 +180,6 @@ export default class Decoration {
                     item.rotationY,
                     item.scale
                 )
-                instance.setVisible(true)
 
                 const key = packKey(item.tile.x, item.tile.z)
                 const list = chunk.decoByTile.get(key)
