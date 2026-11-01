@@ -170,6 +170,10 @@ export default class PlayerController {
             if (e.code === "KeyR") {
                 this.game.restart()
             }
+
+            if (e.code === "Escape" && this.game.session.over) {
+                this.game.closePopup()
+            }
         })
 
         document.addEventListener("keyup", (e: KeyboardEvent) => {
@@ -179,7 +183,16 @@ export default class PlayerController {
         document.addEventListener("mousedown", (e: MouseEvent) => {
             const target = e.target as HTMLElement | null
             if (target && target.closest('#popup')) return
-            if (this.game.session.over) return
+            if (target && target.closest('#floating-restart-btn')) return
+
+            // After a loss, allow looking around the revealed map but keep
+            // tile opening and flagging disabled.
+            if (this.game.session.over) {
+                if (!this.controls.isLocked) {
+                    this.controls.lock()
+                }
+                return
+            }
 
             // If not locked yet, only lock controls and do NOT interact (prevents missclick on focus)
             if (!this.controls.isLocked) {

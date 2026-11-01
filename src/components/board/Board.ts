@@ -1,5 +1,6 @@
 import type { Object3D } from 'three'
 import Flag from './Flag'
+import type Chunk from './Chunk'
 import Terrain from './Terrain'
 import Decoration from './Decoration'
 import ChunkManager from './ChunkManager'
@@ -27,6 +28,9 @@ export default class Board {
     public accessible = new Set<number>()
 
     public started = false
+    // End-game bomb reveal is board state, so chunks streamed after the loss
+    // also show their bombs.
+    public bombsRevealed = false
     public seed: number
 
     public preloadedFlag: Object3D | null = null
@@ -124,15 +128,21 @@ export default class Board {
         return this.chunkManager.getTile(x, z)
     }
 
-    // Reveal every bomb inside the chunks the player can currently see.
+    // Reveal every bomb in the chunks the player can currently see.
     public revealAllBombs(): void {
+        this.bombsRevealed = true
         for (const chunk of this.chunkManager.chunks.values()) {
-            for (const tile of chunk.tiles) {
-                if (tile.isOpen()) continue
-                tile.computeValue()
-                if (tile.value === 'bomb') {
-                    tile.reveal(true)
-                }
+            this.revealBombsInChunk(chunk)
+        }
+    }
+
+    // A chunk created after the loss reveals its bombs like every loaded one.
+    public revealBombsInChunk(chunk: Chunk): void {
+        for (const tile of chunk.tiles) {
+            if (tile.isOpen()) continue
+            tile.computeValue()
+            if (tile.value === 'bomb') {
+                tile.reveal(true)
             }
         }
     }
@@ -151,6 +161,7 @@ export default class Board {
 
     public restart(): void {
         this.started = false
+        this.bombsRevealed = false
 
         this.opened.clear()
         this.flagged.clear()

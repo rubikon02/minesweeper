@@ -23,6 +23,12 @@ ember-red seam. Bombs are revealed only when the game ends, so the pod is
 decorative and has no distance cue. It is deliberately not a flower, so it
 cannot be mistaken for a bloom marker.
 
+## Bomb reveal
+
+The end of a lost game reveals every bomb tile. The reveal covers the whole
+board, including chunks streamed in after the loss, so inspecting the map
+never shows a mix of revealed and hidden bombs.
+
 ## Canonical Minesweeper palette
 
 The traditional number colors: 1 blue, 2 green, 3 red, 4 navy, 5 maroon,

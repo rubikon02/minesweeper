@@ -290,6 +290,11 @@ export default class Chunk {
                 }
             }
         }
+
+        // Chunks streamed in after a loss must match the already revealed map.
+        if (board.bombsRevealed) {
+            board.revealBombsInChunk(this)
+        }
     }
 
     public reapplyState(): void {

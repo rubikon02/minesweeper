@@ -181,13 +181,39 @@ export default class Game implements SessionView {
         restartBtn.onclick = () => this.restart()
         card.appendChild(restartBtn)
 
+        const viewMapBtn = document.createElement("button")
+        viewMapBtn.id = "popup-view-map-btn"
+        viewMapBtn.innerText = "View Map"
+        viewMapBtn.onclick = () => this.closePopup()
+        card.appendChild(viewMapBtn)
+
         popup.appendChild(card)
         document.body.appendChild(popup)
+    }
+
+    public closePopup(): void {
+        const popup = document.getElementById("popup")
+        if (!popup) return
+        popup.remove()
+        if (this.session.over) this.showFloatingRestart()
+    }
+
+    private showFloatingRestart(): void {
+        if (document.getElementById("floating-restart-btn")) return
+
+        const button = document.createElement("button")
+        button.id = "floating-restart-btn"
+        button.innerText = "Play Again (R)"
+        button.onclick = () => this.restart()
+        document.body.appendChild(button)
     }
 
     public restart(): void {
         const popup = document.getElementById("popup")
         if (popup) popup.remove()
+
+        const floatingRestart = document.getElementById("floating-restart-btn")
+        if (floatingRestart) floatingRestart.remove()
 
         this.board.restart()
         this.horizon.reseed()
