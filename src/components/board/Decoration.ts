@@ -22,7 +22,6 @@ import bushA from '../../assets/nature/plant_bush.glb'
 import bushB from '../../assets/nature/plant_bushSmall.glb'
 import plantA from '../../assets/nature/plant_flatTall.glb'
 import grassA from '../../assets/nature/grass.glb'
-import flowerA from '../../assets/nature/flower_redA.glb'
 import type Board from './Board'
 import type Chunk from './Chunk'
 import type Tile from './Tile'
@@ -46,7 +45,6 @@ const SOURCES: ModelSource[] = [
     { kind: 'bush', url: bushB },
     { kind: 'bush', url: plantA },
     { kind: 'grass', url: grassA },
-    { kind: 'grass', url: flowerA },
 ]
 
 // One part of a template model (a single mesh inside the GLB).

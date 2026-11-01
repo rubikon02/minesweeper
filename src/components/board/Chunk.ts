@@ -1,6 +1,5 @@
 import {
     BufferGeometry,
-    BufferAttribute,
     Mesh,
     MeshStandardMaterial,
     DataTexture,
@@ -13,21 +12,15 @@ import {
 
 import Tile from './Tile'
 import { getCloudTexture } from './Fog'
-import { getIconMaterial, ICON_CELL, iconCell } from './icons'
+import { buildMarkerGeometry, getMarkerMaterial } from './Marker'
 import { buildTerrainSurface } from './TerrainSurface'
 import { CHUNK_SIZE, packKey } from '../../utils/coords'
 import type Board from './Board'
+import type { MarkerEntry } from './Marker'
 import type { DecoInstance } from './Decoration'
 
-interface IconEntry {
-    cell: number
-    x: number
-    y: number
-    z: number
-}
-
 // A chunk owns every mesh for a square block of tiles: the merged terrain,
-// the merged fog cover, the merged number/bomb icons and the decoration.
+// the merged fog cover, the merged tile markers and the decoration.
 // Tiles inside it stay lightweight.
 export default class Chunk {
     public board: Board
@@ -49,9 +42,10 @@ export default class Chunk {
     private maskTexture: DataTexture
     private anim = new Map<number, number>()
 
-    private iconMesh: Mesh
-    private iconEntries: IconEntry[] = []
-    private iconDirty = false
+    private markerMesh: Mesh
+    private markerEntries = new Map<number, MarkerEntry>()
+    private pendingMarkers = new Map<number, Tile>()
+    private markerDirty = false
 
     public decoByTile = new Map<number, DecoInstance[]>()
     private decoMeshes: Mesh[] = []
@@ -88,11 +82,11 @@ export default class Chunk {
         this.fogMesh.position.y = 0.4
         this.group.add(this.fogMesh)
 
-        this.iconMesh = new Mesh(new BufferGeometry(), getIconMaterial())
-        this.iconMesh.visible = false
-        this.iconMesh.raycast = () => void 0
-        this.iconMesh.frustumCulled = false
-        this.group.add(this.iconMesh)
+        this.markerMesh = new Mesh(new BufferGeometry(), getMarkerMaterial())
+        this.markerMesh.visible = false
+        this.markerMesh.raycast = () => void 0
+        this.markerMesh.frustumCulled = false
+        this.group.add(this.markerMesh)
 
         // Scatter props, then apply the persisted reveal state.
         this.decorate()
@@ -194,63 +188,63 @@ export default class Chunk {
         }
     }
 
-    public markIcon(tile: Tile): void {
-        const cell = iconCell(tile.value)
-        if (cell < 0) return
-        const x = tile.worldX - this.originX
-        const z = tile.worldZ - this.originZ
-        this.iconEntries.push({ cell, x, y: tile.maxCornerY + 1.5, z })
-        this.iconDirty = true
+    // Add the marker for a tile once its fog cover is gone. During the fade
+    // it waits in `pendingMarkers`, so a hidden tile never reveals early.
+    public markMarker(tile: Tile): void {
+        if (!tile.hasMarker()) return
+        const idx = this.tileIndex(tile)
+        if (idx < 0 || this.markerEntries.has(idx)) return
+
+        if (this.maskData[idx] !== 0) {
+            this.pendingMarkers.set(idx, tile)
+            return
+        }
+        this.addMarker(idx, tile)
     }
 
-    private rebuildIcons(): void {
-        this.iconDirty = false
-        const entries = this.iconEntries
-        this.iconMesh.geometry.dispose()
+    private tileIndex(tile: Tile): number {
+        const lx = tile.x - this.cx * CHUNK_SIZE
+        const lz = tile.z - this.cz * CHUNK_SIZE
+        if (lx < 0 || lx >= CHUNK_SIZE || lz < 0 || lz >= CHUNK_SIZE) return -1
+        return lz * CHUNK_SIZE + lx
+    }
 
+    private addMarker(idx: number, tile: Tile): void {
+        this.markerEntries.set(idx, {
+            value: tile.value,
+            worldX: tile.worldX,
+            worldZ: tile.worldZ,
+        })
+        this.markerDirty = true
+    }
+
+    private flushPendingMarker(idx: number): void {
+        const tile = this.pendingMarkers.get(idx)
+        if (!tile) return
+        this.pendingMarkers.delete(idx)
+        this.addMarker(idx, tile)
+    }
+
+    // Merge every marker in the chunk into one vertex-coloured geometry.
+    private rebuildMarkers(): void {
+        this.markerDirty = false
+        this.markerMesh.geometry.dispose()
+
+        const entries = Array.from(this.markerEntries.values())
         if (entries.length === 0) {
-            this.iconMesh.geometry = new BufferGeometry()
-            this.iconMesh.visible = false
+            this.markerMesh.geometry = new BufferGeometry()
+            this.markerMesh.visible = false
             return
         }
 
-        const half = this.board.tileSize * 0.36
-        const positions = new Float32Array(entries.length * 18)
-        const uvs = new Float32Array(entries.length * 12)
-
-        let pi = 0
-        let ui = 0
-        for (const e of entries) {
-            const u0 = e.cell * ICON_CELL
-            const u1 = u0 + ICON_CELL
-            const x0 = e.x - half
-            const x1 = e.x + half
-            const z0 = e.z - half
-            const z1 = e.z + half
-            const y = e.y
-
-            // p0(-,-) p3(-,+) p2(+,+) p1(+,-)
-            positions[pi++] = x0; positions[pi++] = y; positions[pi++] = z0
-            positions[pi++] = x0; positions[pi++] = y; positions[pi++] = z1
-            positions[pi++] = x1; positions[pi++] = y; positions[pi++] = z1
-            positions[pi++] = x0; positions[pi++] = y; positions[pi++] = z0
-            positions[pi++] = x1; positions[pi++] = y; positions[pi++] = z1
-            positions[pi++] = x1; positions[pi++] = y; positions[pi++] = z0
-
-            uvs[ui++] = u0; uvs[ui++] = 0
-            uvs[ui++] = u0; uvs[ui++] = 1
-            uvs[ui++] = u1; uvs[ui++] = 1
-            uvs[ui++] = u0; uvs[ui++] = 0
-            uvs[ui++] = u1; uvs[ui++] = 1
-            uvs[ui++] = u1; uvs[ui++] = 0
-        }
-
-        const geometry = new BufferGeometry()
-        geometry.setAttribute('position', new BufferAttribute(positions, 3))
-        geometry.setAttribute('uv', new BufferAttribute(uvs, 2))
-        geometry.computeBoundingSphere()
-        this.iconMesh.geometry = geometry
-        this.iconMesh.visible = true
+        const geometry = buildMarkerGeometry(
+            entries,
+            (x, z) => this.board.terrain.heightAtWorld(x, z),
+            this.originX,
+            this.originZ
+        )
+        this.markerMesh.geometry = geometry
+        this.markerMesh.visible = true
     }
 
     // Ask the decoration manager to fill this chunk with props.
@@ -288,7 +282,7 @@ export default class Chunk {
             const key = packKey(tile.x, tile.z)
             if (board.opened.has(key)) {
                 tile.restoreOpen()
-                this.setDecoVisible(tile, !tile.hasIcon())
+                this.setDecoVisible(tile, !tile.hasMarker())
             } else {
                 this.setDecoVisible(tile, false)
                 if (board.flagged.has(key)) {
@@ -303,24 +297,25 @@ export default class Chunk {
     }
 
     public update(delta: number): void {
-        if (this.iconDirty) this.rebuildIcons()
-
-        if (this.anim.size === 0) return
-
-        let changed = false
-        const speed = delta / 0.35 * 255
-        for (const [idx, value] of this.anim) {
-            const next = value - speed
-            if (next <= 0) {
-                this.maskData[idx] = 0
-                this.anim.delete(idx)
-            } else {
-                this.maskData[idx] = next
-                this.anim.set(idx, next)
+        if (this.anim.size > 0) {
+            let changed = false
+            const speed = delta / 0.35 * 255
+            for (const [idx, value] of this.anim) {
+                const next = value - speed
+                if (next <= 0) {
+                    this.maskData[idx] = 0
+                    this.anim.delete(idx)
+                    this.flushPendingMarker(idx)
+                } else {
+                    this.maskData[idx] = next
+                    this.anim.set(idx, next)
+                }
+                changed = true
             }
-            changed = true
+            if (changed) this.maskTexture.needsUpdate = true
         }
-        if (changed) this.maskTexture.needsUpdate = true
+
+        if (this.markerDirty) this.rebuildMarkers()
     }
 
     public dispose(): void {
@@ -333,6 +328,6 @@ export default class Chunk {
         this.geometry.dispose()
         this.maskTexture.dispose()
         this.fogMaterial.dispose()
-        this.iconMesh.geometry.dispose()
+        this.markerMesh.geometry.dispose()
     }
 }

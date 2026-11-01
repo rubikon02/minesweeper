@@ -4,7 +4,7 @@ import type Terrain from './Terrain'
 import Flag from './Flag'
 
 // A single logical tile. Tiles carry no geometry of their own any more:
-// the chunk they belong to owns the merged terrain, fog and icon meshes.
+// the chunk they belong to owns the merged terrain, fog and marker meshes.
 // Tiles only track value, open state and the flag mesh.
 export default class Tile {
     public board: Board
@@ -17,8 +17,6 @@ export default class Tile {
     public worldX: number
     public worldZ: number
     public surfaceY: number
-    // Highest corner of the tile, used to place icons above it.
-    public maxCornerY: number
 
     public flag: Flag
 
@@ -36,14 +34,12 @@ export default class Tile {
         this.worldX = (x + 0.5) * ts
         this.worldZ = (z + 0.5) * ts
         this.surfaceY = this.terrain.surfaceY(x, z)
-        const corners = this.terrain.tileCorners(x, z)
-        this.maxCornerY = Math.max(corners.a, corners.b, corners.c, corners.d)
 
         this.flag = new Flag(this)
     }
 
-    // True when this tile shows a number or a bomb icon.
-    public hasIcon(): boolean {
+    // True when this tile shows a bloom marker or a bomb pod.
+    public hasMarker(): boolean {
         return this.value === 'bomb' || (typeof this.value === 'number' && this.value >= 1)
     }
 
@@ -92,9 +88,9 @@ export default class Tile {
         this.board.registerOpened(this.x, this.z)
         this.chunk.setRevealed(this.x, this.z, instant)
 
-        // Props would cover the number, so keep them hidden on icon tiles.
-        if (this.hasIcon()) {
-            this.chunk.markIcon(this)
+        // Props would cover the marker, so keep them hidden on marker tiles.
+        if (this.hasMarker()) {
+            this.chunk.markMarker(this)
             this.chunk.setDecoVisible(this, false)
         } else {
             this.chunk.setDecoVisible(this, true)
@@ -109,8 +105,8 @@ export default class Tile {
         this.computeValue()
         this.chunk.setRevealed(this.x, this.z, true)
 
-        if (this.hasIcon()) {
-            this.chunk.markIcon(this)
+        if (this.hasMarker()) {
+            this.chunk.markMarker(this)
             this.chunk.setDecoVisible(this, false)
         } else {
             this.chunk.setDecoVisible(this, true)

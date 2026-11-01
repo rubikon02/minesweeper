@@ -52,10 +52,10 @@ Entry: `src/index.ts` mounts `Game` into `#root`.
   farther ones, owns `meshList` for raycasting.
 - `src/components/board/Chunk.ts` — one merged terrain mesh, one merged fog
   mesh with a per-chunk reveal mask (`DataTexture`, 255 hidden / 0 shown),
-  one merged icon mesh, and instanced decoration. All geometry is local to
+  one merged marker mesh, and instanced decoration. All geometry is local to
   the chunk origin; the chunk group carries the world offset.
 - `src/components/board/Tile.ts` — logical tile only: value, open state,
-  flag. Value comes from `Board.isBomb`; icons are registered on the chunk.
+  flag. Value comes from `Board.isBomb`; markers are registered on the chunk.
   Empty tiles flood-open iteratively.
 - `src/components/board/Terrain.ts` — procedural heights. `heightAt` is a
   pure function of grid corner, memoised. `tileCorners`, `surfaceY`,
@@ -66,8 +66,10 @@ Entry: `src/index.ts` mounts `Game` into `#root`.
 - `src/components/board/Flag.ts` — preloads `flag.obj`/`flag.mtl`, clones per
   tile, hides with chunk disposal, falls back to a primitive pole/cone.
 - `src/components/board/Fog.ts` — shared cloud canvas texture.
-- `src/components/board/icons.ts` — shared `tiles.png` atlas. Column 1 is
-  bomb, column `n + 2` is number `n`; `ICON_CELL = 0.0625`.
+- `src/components/board/Marker.ts` — procedural low-poly tile markers:
+  bloom plants for numbers, seed pods for bombs. `buildMarkerGeometry` is the
+  pure seam (entries + height sampler + chunk origin in, merged vertex-colored
+  geometry out); all chunks share one flat-shaded `MeshStandardMaterial`.
 - `src/components/board/Horizon.ts` — coarse far-terrain mesh from the same
   height function.
 - `src/utils/coords.ts` — `CHUNK_SIZE = 16`, `CHUNK_RADIUS = 3`,
@@ -97,7 +99,7 @@ Entry: `src/index.ts` mounts `Game` into `#root`.
 - Comments explain *why* (coordinate quirks, z-fighting, performance), not
   what. Preserve existing comments.
 - Avoid per-tile meshes: batch into chunk-level geometry or `InstancedMesh`.
-  Reuse shared materials/textures (terrain, icons, clouds).
+  Reuse shared materials/textures (terrain, markers, clouds).
 - Dispose GPU resources (`geometry`, `material`, `texture`) when removing
   chunks or rebuilding decorations.
 - DOM HUD is addressed by element ID directly from `Game`; there is no UI
@@ -107,7 +109,7 @@ Entry: `src/index.ts` mounts `Game` into `#root`.
 
 - `Horizon` is constructed and updated in `Game.render`, but its scene add is
   commented out (`Game.ts:91`). It is currently invisible.
-- Icon tiles hide decorations; revealed empty/numbered tiles re-show props.
+- Marker tiles hide decorations; revealed empty tiles re-show props.
   Keep `setDecoVisible` in sync when restoring chunk state.
 - `Chunk.restoreState` must re-apply opened/flagged state after a chunk is
   rebuilt; scoring must not run on restore (`restoreOpen`).
