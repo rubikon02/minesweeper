@@ -15,7 +15,8 @@ import Horizon from './board/Horizon'
 import Board from './board/Board'
 import Player from './Player'
 import PlayerController from './PlayerController'
-import type Tile from './board/Tile'
+import Session from './Session'
+import type { SessionState, SessionView } from './Session'
 
 // Simple vertical gradient used as the sky backdrop.
 function createSkyTexture(): CanvasTexture {
@@ -34,7 +35,7 @@ function createSkyTexture(): CanvasTexture {
     return texture
 }
 
-export default class Game {
+export default class Game implements SessionView {
     public container: HTMLElement
     public manager: LoadingManager
     public scene!: Scene
@@ -43,20 +44,16 @@ export default class Game {
     public clock!: Clock
     public horizon!: Horizon
     public board!: Board
+    public session!: Session
     public player!: Player
     public playerController!: PlayerController
-
-    public points = 0
-    public timer = 0
-    public timerInterval: ReturnType<typeof setInterval> | null = null
-    public flagsPlaced = 0
 
     constructor(container: HTMLElement) {
         this.container = container
         this.manager = new LoadingManager()
 
         this.createWorld()
-        this.updateHUD()
+        this.renderSession(this.session.getState(), 0)
         this.render()
     }
 
@@ -90,44 +87,37 @@ export default class Game {
         this.horizon = new Horizon(this.board)
         // this.scene.add(this.horizon)
 
+        this.session = new Session(this.board, this)
+
         this.player = new Player(this)
         this.playerController = new PlayerController(this)
     }
 
-    public startTimer(): void {
-        if (this.timerInterval) return
-        this.timer = 0
-        this.timerInterval = setInterval(() => {
-            this.timer++
-            const timeEl = document.getElementById("timeCount")
-            if (timeEl) {
-                timeEl.innerText = `${this.timer}s`
-            }
-        }, 1000)
-    }
-
-    public stopTimer(): void {
-        if (this.timerInterval) {
-            clearInterval(this.timerInterval)
-            this.timerInterval = null
-        }
-    }
-
-    public addPoints(difference: number): void {
-        this.points += difference
-
+    public renderSession(state: SessionState, scoreDelta: number): void {
         const pointsEl = document.getElementById("points")
         if (pointsEl) {
-            pointsEl.innerText = this.points.toString()
+            pointsEl.innerText = state.points.toString()
         }
+
+        const minesEl = document.getElementById("minesCount")
+        if (minesEl) {
+            minesEl.innerText = `${state.opened}`
+        }
+
+        const timeEl = document.getElementById("timeCount")
+        if (timeEl) {
+            timeEl.innerText = `${state.time}s`
+        }
+
+        if (scoreDelta === 0) return
 
         const container = document.getElementById("pointsChangeContainer")
         if (container) {
             container.innerHTML = ""
             const badge = document.createElement("div")
             badge.id = "pointsChange"
-            badge.innerText = (difference > 0 ? "+" : "") + difference
-            badge.style.color = difference > 0 ? "#4ade80" : "#f87171"
+            badge.innerText = (scoreDelta > 0 ? "+" : "") + scoreDelta
+            badge.style.color = scoreDelta > 0 ? "#4ade80" : "#f87171"
             container.appendChild(badge)
 
             setTimeout(() => {
@@ -136,50 +126,7 @@ export default class Game {
         }
     }
 
-    public onFlagPlaced(tile: Tile): void {
-        this.flagsPlaced++
-        this.board.addFlag(tile.x, tile.z)
-        if (tile.value === "bomb" || this.board.isBomb(tile.x, tile.z)) {
-            this.addPoints(50)
-        } else {
-            this.addPoints(-75)
-        }
-        this.updateHUD()
-    }
-
-    public onFlagRemoved(tile: Tile): void {
-        this.flagsPlaced = Math.max(0, this.flagsPlaced - 1)
-        this.board.removeFlag(tile.x, tile.z)
-        if (tile.value === "bomb" || this.board.isBomb(tile.x, tile.z)) {
-            this.addPoints(-50)
-        } else {
-            this.addPoints(75)
-        }
-        this.updateHUD()
-    }
-
-    public updateHUD(): void {
-        const pointsEl = document.getElementById("points")
-        if (pointsEl) {
-            pointsEl.innerText = this.points.toString()
-        }
-
-        const minesEl = document.getElementById("minesCount")
-        if (minesEl && this.board) {
-            minesEl.innerText = `${this.board.opened.size}`
-        }
-
-        const timeEl = document.getElementById("timeCount")
-        if (timeEl) {
-            timeEl.innerText = `${this.timer}s`
-        }
-    }
-
-    public gameOver(_explodedTile: Tile): void {
-        this.stopTimer()
-        this.board.blockActions = true
-        this.board.revealAllBombs()
-
+    public showGameOver(_state: SessionState): void {
         if (this.playerController && this.playerController.controls) {
             this.playerController.controls.unlock()
         }
@@ -190,6 +137,8 @@ export default class Game {
     public showPopup(title: string, subtitle: string, accentColor: string): void {
         const existing = document.getElementById("popup")
         if (existing) existing.remove()
+
+        const state = this.session.getState()
 
         const popup = document.createElement("div")
         popup.id = "popup"
@@ -213,15 +162,15 @@ export default class Game {
         statsGrid.innerHTML = `
             <div class="popup-stat-box">
                 <span class="label">Final Score</span>
-                <span class="value" style="color: ${this.points >= 0 ? '#4ade80' : '#f87171'}">${this.points}</span>
+                <span class="value" style="color: ${state.points >= 0 ? '#4ade80' : '#f87171'}">${state.points}</span>
             </div>
             <div class="popup-stat-box">
                 <span class="label">Time</span>
-                <span class="value">${this.timer}s</span>
+                <span class="value">${state.time}s</span>
             </div>
             <div class="popup-stat-box">
                 <span class="label">Tiles Cleared</span>
-                <span class="value">${this.board.opened.size}</span>
+                <span class="value">${state.opened}</span>
             </div>
         `
         card.appendChild(statsGrid)
@@ -240,15 +189,10 @@ export default class Game {
         const popup = document.getElementById("popup")
         if (popup) popup.remove()
 
-        this.stopTimer()
-        this.timer = 0
-        this.points = 0
-        this.flagsPlaced = 0
-
         this.board.restart()
         this.horizon.reseed()
         this.playerController.resetPosition()
-        this.updateHUD()
+        this.session.restart()
 
         const changeContainer = document.getElementById("pointsChangeContainer")
         if (changeContainer) changeContainer.innerHTML = ""

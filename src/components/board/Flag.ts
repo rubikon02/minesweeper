@@ -16,14 +16,12 @@ import obj from '../../assets/flag.obj'
 import mtl from '../../assets/flag.mtl'
 import type Tile from './Tile'
 import type Board from './Board'
-import type Game from '../Game'
 
 export default class Flag {
     public tile: Tile
     public board: Board
     public x: number
     public z: number
-    public game: Game
     public mesh: Object3D | null = null
 
     constructor(tile: Tile) {
@@ -31,7 +29,6 @@ export default class Flag {
         this.board = this.tile.board
         this.x = this.tile.x
         this.z = this.tile.z
-        this.game = this.board.game
     }
 
     public static preload(manager: LoadingManager, callback: (flag: Object3D) => void): void {
@@ -123,53 +120,19 @@ export default class Flag {
     }
 
     public isVisible(): boolean {
-        return !!(this.mesh && this.mesh.parent === this.game.scene)
+        return !!(this.mesh && this.mesh.parent === this.board.game.scene)
     }
 
-    public toggle(): void {
-        if (this.isVisible()) {
-            this.hide()
-        } else {
-            this.show()
-        }
-    }
-
-    public show(silent = false): void {
-        if (this.board.blockActions) return
-        if (!this.mesh) {
-            this.load()
-        }
-        if (this.mesh && !this.isVisible()) {
-            this.game.scene.add(this.mesh)
-            if (!silent && this.game.onFlagPlaced) {
-                this.game.onFlagPlaced(this.tile)
-            }
-        }
-    }
-
-    public hide(silent = false): void {
-        if (this.board.blockActions && !silent) return
-        if (this.mesh && this.isVisible()) {
-            this.game.scene.remove(this.mesh)
-            if (!silent && this.game.onFlagRemoved) {
-                this.game.onFlagRemoved(this.tile)
-            }
-        }
-    }
-
-    public set(visible: boolean): void {
+    public setVisible(visible: boolean): void {
         if (visible) {
-            this.show()
-        } else {
-            this.hide()
-        }
-    }
-
-    public setSilent(visible: boolean): void {
-        if (visible) {
-            this.show(true)
-        } else {
-            this.hide(true)
+            if (!this.mesh) {
+                this.load()
+            }
+            if (this.mesh && !this.isVisible()) {
+                this.board.game.scene.add(this.mesh)
+            }
+        } else if (this.mesh && this.isVisible()) {
+            this.board.game.scene.remove(this.mesh)
         }
     }
 }

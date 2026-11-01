@@ -1,7 +1,6 @@
 import type Board from './Board'
 import type Chunk from './Chunk'
 import type Terrain from './Terrain'
-import type Game from '../Game'
 import Flag from './Flag'
 
 // A single logical tile. Tiles carry no geometry of their own any more:
@@ -11,7 +10,6 @@ export default class Tile {
     public board: Board
     public chunk: Chunk
     public terrain: Terrain
-    public game: Game
     public x: number
     public z: number
     public value: string | number = 'empty'
@@ -31,7 +29,6 @@ export default class Tile {
         this.chunk = chunk
         this.board = chunk.board
         this.terrain = this.board.terrain
-        this.game = this.board.game
         this.x = x
         this.z = z
 
@@ -84,56 +81,6 @@ export default class Tile {
             }
         }
         return neighbours
-    }
-
-    public toggleFlag(): void {
-        if (!this.isOpen()) {
-            this.flag.toggle()
-        }
-    }
-
-    public open(_silent = false): void {
-        if (this.board.blockActions) return
-        if (this.flag.isVisible() || this.isOpen()) return
-
-        // The first click chooses a safe 3x3 area and starts the clock.
-        this.board.ensureStarted(this.x, this.z)
-
-        this.computeValue()
-        this.reveal()
-
-        if (this.value === 'bomb') {
-            this.game.addPoints(-250)
-            this.game.gameOver(this)
-            return
-        }
-
-        if (this.value === 'empty') {
-            this.game.addPoints(1)
-            this.floodOpen()
-        } else {
-            this.game.addPoints(this.value as number)
-        }
-    }
-
-    // Expand through connected empty tiles, scoring as it goes.
-    private floodOpen(): void {
-        const stack: Tile[] = [this]
-        while (stack.length > 0) {
-            const tile = stack.pop()!
-            for (const neighbour of tile.getNeighbours()) {
-                if (neighbour.isOpen() || neighbour.flag.isVisible()) continue
-                neighbour.computeValue()
-                neighbour.reveal()
-
-                if (neighbour.value === 'empty') {
-                    this.game.addPoints(1)
-                    stack.push(neighbour)
-                } else if (neighbour.value !== 'bomb') {
-                    this.game.addPoints(neighbour.value as number)
-                }
-            }
-        }
     }
 
     // Show the terrain and clear the fog, without any scoring.

@@ -179,7 +179,7 @@ export default class PlayerController {
         document.addEventListener("mousedown", (e: MouseEvent) => {
             const target = e.target as HTMLElement | null
             if (target && target.closest('#popup')) return
-            if (this.game.board && this.game.board.blockActions) return
+            if (this.game.session.over) return
 
             // If not locked yet, only lock controls and do NOT interact (prevents missclick on focus)
             if (!this.controls.isLocked) {
@@ -190,13 +190,11 @@ export default class PlayerController {
             // Only interact with tiles inside the walkable area.
             if (this.player.tileLookedAt) {
                 const tile = this.player.tileLookedAt
-                if (!this.game.board.isTileAccessible(tile.x, tile.z)) return
-
                 if (e.button === 0) {
-                    tile.open()
+                    this.game.session.open(tile)
                 }
                 if (e.button === 2) {
-                    tile.toggleFlag()
+                    this.game.session.toggleFlag(tile)
                 }
             }
         })

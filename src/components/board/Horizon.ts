@@ -1,9 +1,6 @@
-import {
-    BufferGeometry,
-    BufferAttribute,
-    Mesh
-} from 'three'
+import { Mesh } from 'three'
 
+import { buildTerrainSurface } from './TerrainSurface'
 import type Board from './Board'
 
 // A coarse copy of the terrain that reaches out to the horizon, so the
@@ -43,54 +40,22 @@ export default class Horizon extends Mesh {
     }
 
     private rebuild(centerX: number, centerZ: number): void {
-        const terrain = this.board.terrain
         const step = this.step
-        const cells = this.cells
 
         const originX = Math.round(centerX / step) * step - this.halfSpan
         const originZ = Math.round(centerZ / step) * step - this.halfSpan
 
-        const positions = new Float32Array(cells * cells * 18)
-        const colors = new Float32Array(cells * cells * 18)
-        const uvs = new Float32Array(cells * cells * 12)
-        let pi = 0
-        let ci = 0
+        const geometry = buildTerrainSurface(this.board.terrain, {
+            originX,
+            originZ,
+            cells: this.cells,
+            step,
+        })
 
-        for (let i = 0; i < cells; i++) {
-            for (let j = 0; j < cells; j++) {
-                const x0 = originX + i * step
-                const x1 = x0 + step
-                const z0 = originZ + j * step
-                const z1 = z0 + step
-
-                const ha = terrain.heightAtWorld(x0, z0)
-                const hb = terrain.heightAtWorld(x1, z0)
-                const hc = terrain.heightAtWorld(x0, z1)
-                const hd = terrain.heightAtWorld(x1, z1)
-
-                positions[pi++] = x0; positions[pi++] = ha; positions[pi++] = z0
-                positions[pi++] = x1; positions[pi++] = hd; positions[pi++] = z1
-                positions[pi++] = x1; positions[pi++] = hb; positions[pi++] = z0
-                positions[pi++] = x0; positions[pi++] = ha; positions[pi++] = z0
-                positions[pi++] = x0; positions[pi++] = hc; positions[pi++] = z1
-                positions[pi++] = x1; positions[pi++] = hd; positions[pi++] = z1
-
-                const slope = (Math.max(ha, hb, hc, hd) - Math.min(ha, hb, hc, hd)) / step
-                const color = terrain.colorFor((ha + hb + hc + hd) / 4, slope)
-                for (let v = 0; v < 6; v++) {
-                    colors[ci++] = color.r
-                    colors[ci++] = color.g
-                    colors[ci++] = color.b
-                }
-            }
-        }
-
-        const geometry = new BufferGeometry()
-        geometry.setAttribute('position', new BufferAttribute(positions, 3))
-        geometry.setAttribute('color', new BufferAttribute(colors, 3))
-        geometry.setAttribute('uv', new BufferAttribute(uvs, 2))
-        geometry.computeVertexNormals()
-        geometry.computeBoundingSphere()
+        // The builder emits vertices local to its origin; the horizon mesh
+        // carries the world offset itself, just like a chunk group does.
+        this.position.x = originX
+        this.position.z = originZ
 
         if (this.geometry) this.geometry.dispose()
         this.geometry = geometry

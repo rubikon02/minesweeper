@@ -125,3 +125,17 @@ Entry: `src/index.ts` mounts `Game` into `#root`.
   stays on Three.js + simplex-noise.
 - Do not invent a test/lint command that does not exist.
 - Ask before changing save/score semantics or the coordinate packing ranges.
+
+## Agent skills
+
+### Issue tracker
+
+Issues and specs live as markdown files under `.scratch/<feature-slug>/`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Five canonical roles mapped to the same label strings. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `GLOSSARY.md` at the root plus `docs/adr/`. See `docs/agents/domain.md`.

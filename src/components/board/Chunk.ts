@@ -14,6 +14,7 @@ import {
 import Tile from './Tile'
 import { getCloudTexture } from './Fog'
 import { getIconMaterial, ICON_CELL, iconCell } from './icons'
+import { buildTerrainSurface } from './TerrainSurface'
 import { CHUNK_SIZE, packKey } from '../../utils/coords'
 import type Board from './Board'
 import type { DecoInstance } from './Decoration'
@@ -69,7 +70,12 @@ export default class Chunk {
         board.game.scene.add(this.group)
 
         this.createTiles()
-        this.geometry = this.buildTerrainGeometry()
+        this.geometry = buildTerrainSurface(board.terrain, {
+            originX: this.originX,
+            originZ: this.originZ,
+            cells: CHUNK_SIZE,
+            step: ts,
+        })
         this.maskData = new Uint8Array(CHUNK_SIZE * CHUNK_SIZE).fill(255)
         this.maskTexture = this.buildMaskTexture()
 
@@ -109,74 +115,6 @@ export default class Chunk {
                 this.tiles[lx * CHUNK_SIZE + lz] = new Tile(this, gx, gz)
             }
         }
-    }
-
-    // Build one merged surface for the whole chunk. Vertext positions are
-    // local to the chunk origin so precision stays high far from spawn.
-    private buildTerrainGeometry(): BufferGeometry {
-        const ts = this.board.tileSize
-        const terrain = this.board.terrain
-        const quads = CHUNK_SIZE * CHUNK_SIZE
-
-        const positions = new Float32Array(quads * 18)
-        const uvs = new Float32Array(quads * 12)
-        const colors = new Float32Array(quads * 18)
-
-        let pi = 0
-        let ui = 0
-        let ci = 0
-
-        for (let lx = 0; lx < CHUNK_SIZE; lx++) {
-            for (let lz = 0; lz < CHUNK_SIZE; lz++) {
-                const gx = this.cx * CHUNK_SIZE + lx
-                const gz = this.cz * CHUNK_SIZE + lz
-
-                const c = terrain.tileCorners(gx, gz)
-
-                const x0 = gx * ts - this.originX
-                const x1 = x0 + ts
-                const z0 = gz * ts - this.originZ
-                const z1 = z0 + ts
-
-                // Triangles a,d,b then a,c,d (same winding as before).
-                // a = (x0,z0) b = (x1,z0) c = (x0,z1) d = (x1,z1)
-                positions[pi++] = x0; positions[pi++] = c.a; positions[pi++] = z0
-                positions[pi++] = x1; positions[pi++] = c.d; positions[pi++] = z1
-                positions[pi++] = x1; positions[pi++] = c.b; positions[pi++] = z0
-                positions[pi++] = x0; positions[pi++] = c.a; positions[pi++] = z0
-                positions[pi++] = x0; positions[pi++] = c.c; positions[pi++] = z1
-                positions[pi++] = x1; positions[pi++] = c.d; positions[pi++] = z1
-
-                // Continuous UVs in global tile units, so the texture tiles
-                // seamlessly across chunk borders.
-                const u0 = gx
-                const u1 = gx + 1
-                const v0 = gz
-                const v1 = gz + 1
-                uvs[ui++] = u0; uvs[ui++] = v0
-                uvs[ui++] = u1; uvs[ui++] = v1
-                uvs[ui++] = u1; uvs[ui++] = v0
-                uvs[ui++] = u0; uvs[ui++] = v0
-                uvs[ui++] = u0; uvs[ui++] = v1
-                uvs[ui++] = u1; uvs[ui++] = v1
-
-                const slope = (Math.max(c.a, c.b, c.c, c.d) - Math.min(c.a, c.b, c.c, c.d)) / ts
-                const color = terrain.colorFor(terrain.surfaceY(gx, gz), slope)
-                for (let v = 0; v < 6; v++) {
-                    colors[ci++] = color.r
-                    colors[ci++] = color.g
-                    colors[ci++] = color.b
-                }
-            }
-        }
-
-        const geometry = new BufferGeometry()
-        geometry.setAttribute('position', new BufferAttribute(positions, 3))
-        geometry.setAttribute('uv', new BufferAttribute(uvs, 2))
-        geometry.setAttribute('color', new BufferAttribute(colors, 3))
-        geometry.computeVertexNormals()
-        geometry.computeBoundingSphere()
-        return geometry
     }
 
     private buildMaskTexture(): DataTexture {
@@ -354,7 +292,7 @@ export default class Chunk {
             } else {
                 this.setDecoVisible(tile, false)
                 if (board.flagged.has(key)) {
-                    tile.flag.show(true)
+                    tile.flag.setVisible(true)
                 }
             }
         }
@@ -388,7 +326,7 @@ export default class Chunk {
     public dispose(): void {
         // Flags live directly on the scene, so pull them out with the chunk.
         for (const tile of this.tiles) {
-            if (tile.flag.isVisible()) tile.flag.hide(true)
+            if (tile.flag.isVisible()) tile.flag.setVisible(false)
         }
         this.board.game.scene.remove(this.group)
         this.clearDecoration()

@@ -27,7 +27,6 @@ export default class Board {
     public accessible = new Set<number>()
 
     public started = false
-    public blockActions = false
     public seed: number
 
     public preloadedFlag: Object3D | null = null
@@ -75,7 +74,7 @@ export default class Board {
         return hash2(gx, gz, this.seed) < this.bombsDensity
     }
 
-    // The first open picks a 3x3 safe area and starts the timer.
+    // The first open picks a 3x3 safe area. The Session starts the timer.
     public ensureStarted(x: number, z: number): void {
         if (this.started) return
         this.started = true
@@ -84,7 +83,6 @@ export default class Board {
                 this.safeZone.add(packKey(x + dx, z + dz))
             }
         }
-        this.game.startTimer()
     }
 
     // Record an uncovered tile and broaden the accessible area around it.
@@ -152,7 +150,6 @@ export default class Board {
     }
 
     public restart(): void {
-        this.blockActions = false
         this.started = false
 
         this.opened.clear()
