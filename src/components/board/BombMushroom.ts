@@ -1,6 +1,8 @@
 import {
     Box3,
+    Color,
     InstancedMesh,
+    Mesh,
     Object3D,
     Vector3
 } from 'three'
@@ -49,6 +51,7 @@ export default class BombMushroom {
                 // node hierarchy, so no extra rotation is needed here.
                 const object = gltf.scene
                 prepareNatureModel(object)
+                this.tintHead(object)
                 this.measure(object)
                 this.parts = collectModelParts(object)
 
@@ -69,6 +72,24 @@ export default class BombMushroom {
         const height = box.max.y - box.min.y
         this.scale = height > 0 ? HEIGHT / height : 1
         this.footOffset = -box.min.y * this.scale
+    }
+
+    // The authored head is a dark brick red. Push it toward a clearer red so
+    // the bomb marker reads at a glance, while the stem keeps its pale colour.
+    private tintHead(object: Object3D): void {
+        object.traverse(child => {
+            const mesh = child as Mesh
+            if (!mesh.isMesh || !mesh.material) return
+
+            const materials = Array.isArray(mesh.material)
+                ? mesh.material
+                : [mesh.material]
+            for (const material of materials) {
+                if (material.name !== 'LightRed') continue
+                const head = material as unknown as { color?: Color }
+                head.color?.setRGB(0.55, 0.08, 0.06)
+            }
+        })
     }
 
     // Rebuild the bombs of one chunk. Positions are local to the chunk origin
