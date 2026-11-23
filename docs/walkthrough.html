@@ -1,0 +1,2818 @@
+<!DOCTYPE html>
+<html lang="pl" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Walkthrough po architekturze i mechanikach gry 3D Minesweeper: moduły, pętla gry, chunk streaming, teren, bomby, mgła i markery.">
+    <title>3D Minesweeper — architektura i mechaniki</title>
+    <script>
+        (function () {
+            try {
+                var saved = localStorage.getItem('minesweeper-doc-theme');
+                if (saved === 'light' || saved === 'dark') {
+                    document.documentElement.dataset.theme = saved;
+                } else if (window.matchMedia('(prefers-color-scheme: light)').matches) {
+                    document.documentElement.dataset.theme = 'light';
+                }
+            } catch (error) { /* prywatny tryb może blokować localStorage */ }
+        }());
+    </script>
+    <style>
+        :root {
+            color-scheme: dark;
+            --bg: #0b1120;
+            --bg-deep: #070d18;
+            --panel: #111b2e;
+            --panel-2: #16233a;
+            --panel-3: #1c2c47;
+            --text: #e8eef8;
+            --muted: #9fb0c8;
+            --faint: #7285a1;
+            --line: rgba(148, 163, 184, 0.20);
+            --line-strong: rgba(148, 163, 184, 0.38);
+            --accent: #38bdf8;
+            --accent-soft: rgba(56, 189, 248, 0.14);
+            --green: #4ade80;
+            --green-soft: rgba(74, 222, 128, 0.12);
+            --amber: #fbbf24;
+            --amber-soft: rgba(251, 191, 36, 0.12);
+            --red: #f87171;
+            --red-soft: rgba(248, 113, 113, 0.12);
+            --violet: #c4b5fd;
+            --violet-soft: rgba(196, 181, 253, 0.12);
+            --code-bg: #081120;
+            --code-line: rgba(56, 189, 248, 0.18);
+            --shadow: 0 18px 50px -24px rgba(0, 0, 0, 0.75);
+            --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+            --radius: 14px;
+            --topbar: 62px;
+            --toc-width: 286px;
+        }
+
+        html[data-theme="light"] {
+            color-scheme: light;
+            --bg: #f4f7fb;
+            --bg-deep: #e9eef6;
+            --panel: #ffffff;
+            --panel-2: #f7f9fd;
+            --panel-3: #eef3fa;
+            --text: #152033;
+            --muted: #53647c;
+            --faint: #7a8ba2;
+            --line: rgba(30, 48, 74, 0.13);
+            --line-strong: rgba(30, 48, 74, 0.26);
+            --accent: #0369a1;
+            --accent-soft: rgba(3, 105, 161, 0.09);
+            --green: #15803d;
+            --green-soft: rgba(21, 128, 61, 0.09);
+            --amber: #b45309;
+            --amber-soft: rgba(180, 83, 9, 0.09);
+            --red: #b91c1c;
+            --red-soft: rgba(185, 28, 28, 0.08);
+            --violet: #6d28d9;
+            --violet-soft: rgba(109, 40, 217, 0.08);
+            --code-bg: #f0f4fa;
+            --code-line: rgba(3, 105, 161, 0.15);
+            --shadow: 0 20px 50px -30px rgba(30, 48, 74, 0.35);
+        }
+
+        * { box-sizing: border-box; }
+        html { scroll-behavior: smooth; }
+        body {
+            margin: 0;
+            background:
+                radial-gradient(1100px 700px at 8% -10%, rgba(56, 189, 248, 0.08), transparent 60%),
+                radial-gradient(900px 600px at 100% 0%, rgba(74, 222, 128, 0.05), transparent 55%),
+                var(--bg);
+            color: var(--text);
+            font-family: var(--sans);
+            font-size: 16px;
+            line-height: 1.68;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        ::selection { background: var(--accent-soft); color: var(--text); }
+        a { color: var(--accent); text-decoration: none; }
+        a:hover { text-decoration: underline; text-underline-offset: 3px; }
+        strong { color: var(--text); }
+        h1, h2, h3, h4 { line-height: 1.15; letter-spacing: -0.02em; }
+        p { margin: 0 0 1em; }
+        ul, ol { margin: 0 0 1em; padding-left: 1.35em; }
+        li { margin: 0.32em 0; }
+        code, .mono, kbd { font-family: var(--mono); }
+        code {
+            font-size: 0.86em;
+            background: var(--code-bg);
+            border: 1px solid var(--line);
+            border-radius: 5px;
+            padding: 0.08em 0.36em;
+            color: var(--text);
+            overflow-wrap: anywhere;
+        }
+        pre {
+            margin: 0;
+            padding: 16px 18px;
+            background: var(--code-bg);
+            border: 1px solid var(--line);
+            border-radius: 10px;
+            overflow-x: auto;
+            font-size: 13px;
+            line-height: 1.6;
+        }
+        pre code { background: none; border: 0; padding: 0; font-size: inherit; overflow-wrap: normal; }
+        kbd {
+            display: inline-block;
+            min-width: 1.7em;
+            padding: 0.12em 0.42em;
+            border: 1px solid var(--line-strong);
+            border-bottom-width: 2px;
+            border-radius: 5px;
+            background: var(--panel-2);
+            font-size: 0.78em;
+            text-align: center;
+            color: var(--text);
+        }
+        .skip-link {
+            position: fixed;
+            top: -100px;
+            left: 16px;
+            z-index: 100;
+            padding: 10px 14px;
+            background: var(--accent);
+            color: var(--bg-deep);
+            border-radius: 8px;
+            font-weight: 700;
+        }
+        .skip-link:focus { top: 12px; }
+
+        .topbar {
+            position: sticky;
+            top: 0;
+            z-index: 50;
+            height: var(--topbar);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 20px;
+            padding: 0 22px;
+            border-bottom: 1px solid var(--line);
+            background: color-mix(in srgb, var(--bg) 86%, transparent);
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+        }
+        .topbar-left, .topbar-right { display: flex; align-items: center; gap: 14px; min-width: 0; }
+        .brand { display: inline-flex; align-items: center; gap: 10px; color: var(--text); font-weight: 800; letter-spacing: -0.02em; }
+        .brand:hover { text-decoration: none; }
+        .brand-mark {
+            display: grid;
+            place-items: center;
+            width: 34px;
+            height: 34px;
+            border-radius: 9px;
+            background: linear-gradient(135deg, var(--accent), var(--green));
+            color: #06101d;
+            font-family: var(--mono);
+            font-size: 12px;
+            font-weight: 800;
+        }
+        .brand-text { white-space: nowrap; }
+        .brand-text span { color: var(--muted); font-weight: 500; }
+        .topbar-note { color: var(--faint); font-family: var(--mono); font-size: 11px; letter-spacing: 0.04em; }
+        .icon-button {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 11px;
+            border: 1px solid var(--line);
+            border-radius: 9px;
+            background: var(--panel);
+            color: var(--text);
+            font: inherit;
+            font-size: 12px;
+            cursor: pointer;
+        }
+        .icon-button:hover { border-color: var(--line-strong); background: var(--panel-2); }
+        .icon-button:focus-visible, .toc-nav a:focus-visible, .tab:focus-visible, .calc-input:focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: 2px;
+        }
+        .toc-toggle { display: none; }
+
+        .layout { display: flex; align-items: flex-start; }
+        .toc {
+            position: sticky;
+            top: var(--topbar);
+            flex: 0 0 var(--toc-width);
+            width: var(--toc-width);
+            height: calc(100vh - var(--topbar));
+            overflow-y: auto;
+            padding: 24px 18px 40px 22px;
+            border-right: 1px solid var(--line);
+            background: color-mix(in srgb, var(--bg-deep) 55%, transparent);
+            scrollbar-width: thin;
+        }
+        .toc-heading {
+            margin-bottom: 12px;
+            color: var(--faint);
+            font-size: 10px;
+            font-weight: 800;
+            letter-spacing: 0.16em;
+            text-transform: uppercase;
+        }
+        .toc-nav { display: flex; flex-direction: column; gap: 2px; }
+        .toc-nav a {
+            display: flex;
+            align-items: baseline;
+            gap: 10px;
+            padding: 6px 9px;
+            border-radius: 7px;
+            border-left: 2px solid transparent;
+            color: var(--muted);
+            font-size: 13px;
+            line-height: 1.35;
+        }
+        .toc-nav a span {
+            flex: 0 0 21px;
+            color: var(--faint);
+            font-family: var(--mono);
+            font-size: 10px;
+        }
+        .toc-nav a:hover { color: var(--text); background: var(--panel); text-decoration: none; }
+        .toc-nav a.active {
+            color: var(--text);
+            background: var(--accent-soft);
+            border-left-color: var(--accent);
+        }
+        .toc-nav a.active span { color: var(--accent); }
+        .toc-foot {
+            margin-top: 24px;
+            padding-top: 16px;
+            border-top: 1px solid var(--line);
+            color: var(--faint);
+            font-size: 11px;
+            line-height: 1.5;
+        }
+        .toc-foot p { margin: 0 0 7px; }
+        .toc-foot .mono { color: var(--muted); font-size: 10px; }
+    </style>
+    <style>
+        main {
+            flex: 1 1 auto;
+            min-width: 0;
+            width: 100%;
+            max-width: 1160px;
+            margin: 0 auto;
+            padding: 46px 52px 96px;
+        }
+        section {
+            scroll-margin-top: calc(var(--topbar) + 18px);
+            padding: 42px 0 12px;
+            border-top: 1px solid var(--line);
+        }
+        section:first-of-type { border-top: 0; padding-top: 0; }
+        .section-kicker {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 12px;
+            color: var(--accent);
+            font-family: var(--mono);
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+        }
+        .section-kicker::after {
+            content: "";
+            flex: 1;
+            height: 1px;
+            background: linear-gradient(90deg, var(--line-strong), transparent);
+        }
+        h2 {
+            margin: 0 0 14px;
+            font-size: clamp(1.55rem, 2.6vw, 2.2rem);
+            letter-spacing: -0.035em;
+        }
+        .lead {
+            max-width: 76ch;
+            margin-bottom: 24px;
+            color: var(--muted);
+            font-size: 1.03rem;
+        }
+        h3 { margin: 30px 0 10px; font-size: 1.16rem; }
+        h4 { margin: 22px 0 8px; font-size: 0.98rem; }
+        .muted { color: var(--muted); }
+        .small { font-size: 0.9rem; }
+        .tiny { font-size: 0.8rem; }
+        .mono { color: var(--text); }
+
+        .hero { padding-top: 18px; }
+        .eyebrow {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 18px;
+            padding: 6px 10px;
+            border: 1px solid var(--line);
+            border-radius: 999px;
+            background: var(--panel);
+            color: var(--muted);
+            font-family: var(--mono);
+            font-size: 10px;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+        }
+        .eyebrow::before {
+            content: "";
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--green);
+            box-shadow: 0 0 10px var(--green);
+        }
+        .hero h1 {
+            margin: 0 0 18px;
+            font-size: clamp(2.4rem, 6vw, 4.7rem);
+            line-height: 1.02;
+            letter-spacing: -0.055em;
+        }
+        .hero h1 span {
+            display: block;
+            color: transparent;
+            background: linear-gradient(100deg, var(--accent), var(--green) 72%);
+            -webkit-background-clip: text;
+            background-clip: text;
+        }
+        .hero .lead { max-width: 68ch; font-size: clamp(1rem, 1.5vw, 1.16rem); }
+        .hero-stats {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 12px;
+            margin: 26px 0 22px;
+        }
+        .hero-stat {
+            padding: 16px 17px;
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            background: linear-gradient(160deg, var(--panel), color-mix(in srgb, var(--panel) 65%, transparent));
+        }
+        .hero-stat strong {
+            display: block;
+            margin-bottom: 3px;
+            font-family: var(--mono);
+            font-size: 18px;
+            color: var(--accent);
+        }
+        .hero-stat span { color: var(--muted); font-size: 12px; line-height: 1.4; }
+
+        .grid { display: grid; gap: 14px; }
+        .grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+        .grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+        .card {
+            padding: 18px 19px;
+            border: 1px solid var(--line);
+            border-radius: var(--radius);
+            background: var(--panel);
+            box-shadow: var(--shadow);
+        }
+        .card h3, .card h4 { margin-top: 0; }
+        .card > :last-child { margin-bottom: 0; }
+        .card .card-label {
+            display: block;
+            margin-bottom: 7px;
+            color: var(--faint);
+            font-family: var(--mono);
+            font-size: 10px;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+        }
+        .card-accent { border-top: 2px solid var(--accent); }
+        .card-green { border-top: 2px solid var(--green); }
+        .card-amber { border-top: 2px solid var(--amber); }
+        .card-violet { border-top: 2px solid var(--violet); }
+        .card-red { border-top: 2px solid var(--red); }
+
+        .callout {
+            margin: 18px 0;
+            padding: 14px 16px 14px 17px;
+            border: 1px solid var(--line);
+            border-left: 3px solid var(--accent);
+            border-radius: 0 10px 10px 0;
+            background: var(--accent-soft);
+            color: var(--text);
+            font-size: 0.94rem;
+        }
+        .callout p:last-child { margin-bottom: 0; }
+        .callout strong:first-child { color: var(--accent); }
+        .callout.warn { border-left-color: var(--amber); background: var(--amber-soft); }
+        .callout.warn strong:first-child { color: var(--amber); }
+        .callout.danger { border-left-color: var(--red); background: var(--red-soft); }
+        .callout.danger strong:first-child { color: var(--red); }
+        .callout.ok { border-left-color: var(--green); background: var(--green-soft); }
+        .callout.ok strong:first-child { color: var(--green); }
+
+        .pill-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+        .pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 3px 8px;
+            border: 1px solid var(--line);
+            border-radius: 999px;
+            background: var(--panel-2);
+            color: var(--muted);
+            font-family: var(--mono);
+            font-size: 10px;
+            line-height: 1.4;
+        }
+        .pill.accent { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 35%, var(--line)); background: var(--accent-soft); }
+        .pill.green { color: var(--green); border-color: color-mix(in srgb, var(--green) 35%, var(--line)); background: var(--green-soft); }
+        .pill.amber { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 35%, var(--line)); background: var(--amber-soft); }
+        .pill.red { color: var(--red); border-color: color-mix(in srgb, var(--red) 35%, var(--line)); background: var(--red-soft); }
+        .pill.violet { color: var(--violet); border-color: color-mix(in srgb, var(--violet) 35%, var(--line)); background: var(--violet-soft); }
+
+        .table-wrap {
+            margin: 16px 0;
+            overflow-x: auto;
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            background: var(--panel);
+        }
+        table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+        th, td { padding: 10px 13px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); }
+        th {
+            background: var(--panel-2);
+            color: var(--muted);
+            font-size: 10px;
+            font-weight: 800;
+            letter-spacing: 0.09em;
+            text-transform: uppercase;
+            white-space: nowrap;
+        }
+        tr:last-child td { border-bottom: 0; }
+        tbody tr:hover { background: color-mix(in srgb, var(--panel-2) 55%, transparent); }
+        td.num, th.num { text-align: right; font-family: var(--mono); white-space: nowrap; }
+        .table-wrap.compact table { font-size: 0.83rem; }
+
+        .code-block { margin: 16px 0; }
+        .code-block summary {
+            cursor: pointer;
+            padding: 10px 13px;
+            border: 1px solid var(--line);
+            border-radius: 10px;
+            background: var(--panel);
+            color: var(--muted);
+            font-family: var(--mono);
+            font-size: 11px;
+            list-style: none;
+        }
+        .code-block summary::-webkit-details-marker { display: none; }
+        .code-block summary::before { content: "▸ "; color: var(--accent); }
+        .code-block[open] summary { border-radius: 10px 10px 0 0; border-bottom: 0; }
+        .code-block[open] summary::before { content: "▾ "; }
+        .code-block pre { border-radius: 0 0 10px 10px; }
+        .code-label {
+            display: block;
+            margin: 0 0 6px;
+            color: var(--faint);
+            font-family: var(--mono);
+            font-size: 10px;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .arch { display: flex; flex-direction: column; margin: 20px 0; }
+        .arch-row { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 14px; align-items: stretch; }
+        .arch-label {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            padding: 4px 0;
+            color: var(--faint);
+            font-family: var(--mono);
+            font-size: 10px;
+            letter-spacing: 0.08em;
+            text-align: right;
+            text-transform: uppercase;
+        }
+        .arch-cards { display: flex; flex-wrap: wrap; gap: 8px; }
+        .mod {
+            flex: 1 1 170px;
+            min-width: 155px;
+            padding: 11px 12px;
+            border: 1px solid var(--line);
+            border-radius: 10px;
+            background: var(--panel);
+        }
+        .mod strong { display: block; font-family: var(--mono); font-size: 12px; font-weight: 700; }
+        .mod span { display: block; margin-top: 2px; color: var(--muted); font-size: 10.5px; line-height: 1.4; }
+        .mod .path { color: var(--faint); font-family: var(--mono); font-size: 9.5px; overflow-wrap: anywhere; }
+        .mod.runtime { border-left: 3px solid var(--accent); }
+        .mod.rules { border-left: 3px solid var(--green); }
+        .mod.world { border-left: 3px solid var(--violet); }
+        .mod.view { border-left: 3px solid var(--amber); }
+        .mod.util { border-left: 3px solid var(--faint); }
+        .arch-arrow {
+            display: flex;
+            align-items: center;
+            gap: 9px;
+            margin: 6px 0 6px 126px;
+            color: var(--faint);
+            font-family: var(--mono);
+            font-size: 10px;
+        }
+        .arch-arrow::before { content: "↓"; color: var(--accent); font-size: 14px; }
+
+        .diagram {
+            margin: 18px 0;
+            padding: 14px;
+            border: 1px solid var(--line);
+            border-radius: 14px;
+            background:
+                linear-gradient(180deg, color-mix(in srgb, var(--panel) 80%, transparent), var(--panel));
+            overflow-x: auto;
+        }
+        .diagram svg { display: block; width: 100%; min-width: 760px; height: auto; }
+        .diagram-caption {
+            margin: 8px 2px 0;
+            color: var(--faint);
+            font-size: 11px;
+            line-height: 1.5;
+        }
+        .diagram-caption strong { color: var(--muted); }
+    </style>
+    <style>
+        .flow { display: flex; flex-direction: column; gap: 0; margin: 18px 0; }
+        .flow-step {
+            position: relative;
+            display: grid;
+            grid-template-columns: 34px minmax(0, 1fr);
+            gap: 12px;
+            padding: 0 0 16px;
+        }
+        .flow-step:last-child { padding-bottom: 0; }
+        .flow-step::before {
+            content: "";
+            position: absolute;
+            left: 16px;
+            top: 31px;
+            bottom: -1px;
+            width: 1px;
+            background: var(--line-strong);
+        }
+        .flow-step:last-child::before { display: none; }
+        .flow-num {
+            position: relative;
+            z-index: 1;
+            display: grid;
+            place-items: center;
+            width: 33px;
+            height: 33px;
+            border: 1px solid var(--line-strong);
+            border-radius: 50%;
+            background: var(--panel);
+            color: var(--accent);
+            font-family: var(--mono);
+            font-size: 11px;
+            font-weight: 700;
+        }
+        .flow-body {
+            min-width: 0;
+            padding: 2px 0 0;
+        }
+        .flow-body strong { display: block; margin-bottom: 3px; font-size: 0.96rem; }
+        .flow-body p { margin: 0; color: var(--muted); font-size: 0.9rem; }
+        .flow-body pre { margin-top: 8px; }
+
+        .branches { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 18px 0; }
+        .branch {
+            padding: 15px;
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            background: var(--panel);
+        }
+        .branch h4 { margin: 0 0 7px; }
+        .branch p { margin: 0 0 9px; color: var(--muted); font-size: 0.88rem; }
+        .branch .score { font-family: var(--mono); font-size: 12px; font-weight: 700; }
+        .branch.bomb { border-top: 2px solid var(--red); }
+        .branch.bomb .score { color: var(--red); }
+        .branch.empty { border-top: 2px solid var(--green); }
+        .branch.empty .score { color: var(--green); }
+        .branch.number { border-top: 2px solid var(--accent); }
+        .branch.number .score { color: var(--accent); }
+
+        .tabs { margin: 18px 0; }
+        .tablist {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 5px;
+            margin-bottom: 12px;
+            padding: 4px;
+            border: 1px solid var(--line);
+            border-radius: 11px;
+            background: var(--panel-2);
+        }
+        .tab {
+            padding: 8px 12px;
+            border: 0;
+            border-radius: 7px;
+            background: transparent;
+            color: var(--muted);
+            font: inherit;
+            font-size: 12px;
+            cursor: pointer;
+        }
+        .tab:hover { color: var(--text); background: var(--panel); }
+        .tab[aria-selected="true"] {
+            color: var(--bg-deep);
+            background: var(--accent);
+            font-weight: 700;
+        }
+        .tabpanel {
+            padding: 18px;
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            background: var(--panel);
+        }
+        .tabpanel[hidden] { display: none; }
+        .tabpanel > :last-child { margin-bottom: 0; }
+
+        .chunk-wrap {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 250px;
+            gap: 20px;
+            align-items: start;
+            margin: 18px 0;
+        }
+        .chunk-grid {
+            display: grid;
+            grid-template-columns: repeat(9, minmax(0, 1fr));
+            gap: 3px;
+            max-width: 470px;
+            padding: 10px;
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            background: var(--panel-2);
+        }
+        .chunk-cell {
+            aspect-ratio: 1;
+            display: grid;
+            place-items: center;
+            border: 1px solid var(--line);
+            border-radius: 3px;
+            color: var(--faint);
+            font-family: var(--mono);
+            font-size: 8px;
+        }
+        .chunk-cell.built { background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 30%, var(--line)); color: var(--accent); }
+        .chunk-cell.buffer { background: var(--amber-soft); border-color: color-mix(in srgb, var(--amber) 28%, var(--line)); color: var(--amber); }
+        .chunk-cell.center { background: var(--green-soft); border-color: var(--green); color: var(--green); font-weight: 800; box-shadow: 0 0 0 2px color-mix(in srgb, var(--green) 22%, transparent); }
+        .legend { display: flex; flex-direction: column; gap: 8px; font-size: 12px; color: var(--muted); }
+        .legend-item { display: flex; align-items: flex-start; gap: 8px; }
+        .swatch { flex: 0 0 13px; width: 13px; height: 13px; margin-top: 3px; border: 1px solid var(--line-strong); border-radius: 3px; }
+        .swatch.built { background: var(--accent-soft); border-color: var(--accent); }
+        .swatch.buffer { background: var(--amber-soft); border-color: var(--amber); }
+        .swatch.center { background: var(--green-soft); border-color: var(--green); }
+
+        .coord-strip {
+            display: flex;
+            align-items: stretch;
+            margin: 18px 0;
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            overflow: hidden;
+            font-size: 12px;
+        }
+        .coord-block { display: flex; flex-direction: column; justify-content: center; padding: 12px 14px; background: var(--panel); }
+        .coord-block + .coord-block { border-left: 1px solid var(--line); }
+        .coord-block strong { font-family: var(--mono); color: var(--accent); font-size: 13px; }
+        .coord-block span { color: var(--muted); font-size: 11px; }
+
+        .calculator {
+            display: grid;
+            grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+            gap: 18px;
+            margin: 18px 0;
+            padding: 18px;
+            border: 1px solid var(--line);
+            border-radius: 14px;
+            background: var(--panel);
+        }
+        .calc-controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
+        .calc-field { display: flex; flex-direction: column; gap: 5px; }
+        .calc-field label { color: var(--muted); font-size: 11px; }
+        .calc-input {
+            width: 128px;
+            padding: 8px 10px;
+            border: 1px solid var(--line-strong);
+            border-radius: 7px;
+            background: var(--code-bg);
+            color: var(--text);
+            font-family: var(--mono);
+            font-size: 13px;
+        }
+        .calc-output { display: grid; gap: 6px; }
+        .calc-row {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 6px 0;
+            border-bottom: 1px dashed var(--line);
+            font-size: 12px;
+        }
+        .calc-row:last-child { border-bottom: 0; }
+        .calc-row span { color: var(--muted); }
+        .calc-row strong { font-family: var(--mono); font-size: 11.5px; text-align: right; overflow-wrap: anywhere; }
+        .calc-error { color: var(--red); font-size: 11px; min-height: 1em; }
+
+        .render-tree {
+            margin: 18px 0;
+            padding: 16px 18px;
+            border: 1px solid var(--line);
+            border-radius: 14px;
+            background: var(--code-bg);
+            font-family: var(--mono);
+            font-size: 12px;
+            line-height: 1.85;
+            overflow-x: auto;
+        }
+        .render-tree pre {
+            padding: 0;
+            border: 0;
+            border-radius: 0;
+            background: none;
+            font-size: inherit;
+            line-height: inherit;
+            white-space: pre;
+        }
+        .render-tree .note { color: var(--faint); font-style: italic; }
+
+        .state-machine {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 12px;
+            margin: 18px 0;
+        }
+        .state {
+            position: relative;
+            padding: 15px;
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            background: var(--panel);
+        }
+        .state h4 { margin: 0 0 6px; font-size: 0.95rem; }
+        .state p { margin: 0; color: var(--muted); font-size: 0.85rem; }
+        .state .state-tag { display: inline-block; margin-bottom: 8px; padding: 2px 7px; border-radius: 999px; font-family: var(--mono); font-size: 9px; text-transform: uppercase; letter-spacing: 0.08em; }
+        .state.before { border-top: 2px solid var(--muted); }
+        .state.before .state-tag { color: var(--muted); background: var(--panel-2); }
+        .state.running { border-top: 2px solid var(--green); }
+        .state.running .state-tag { color: var(--green); background: var(--green-soft); }
+        .state.over { border-top: 2px solid var(--red); }
+        .state.over .state-tag { color: var(--red); background: var(--red-soft); }
+
+        .file-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 16px 0; }
+        .file {
+            display: flex;
+            gap: 10px;
+            align-items: flex-start;
+            padding: 10px 12px;
+            border: 1px solid var(--line);
+            border-radius: 9px;
+            background: var(--panel);
+            font-size: 12px;
+        }
+        .file code { flex: 0 0 auto; font-size: 11px; }
+        .file span { color: var(--muted); font-size: 11.5px; line-height: 1.45; }
+
+        .glossary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 18px 0; }
+        .term { padding: 14px 15px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+        .term dt { margin-bottom: 5px; color: var(--accent); font-family: var(--mono); font-size: 12px; font-weight: 700; }
+        .term dd { margin: 0; color: var(--muted); font-size: 0.88rem; }
+
+        .footer {
+            padding: 26px 52px 42px;
+            border-top: 1px solid var(--line);
+            color: var(--faint);
+            font-size: 12px;
+        }
+        .footer p { max-width: 900px; margin: 0 0 6px; }
+        .footer .mono { color: var(--muted); font-size: 11px; }
+
+        .kbd-line { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0; color: var(--muted); font-size: 12px; }
+
+        @media (max-width: 1100px) {
+            main { padding: 38px 30px 80px; }
+            .grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+            .chunk-wrap { grid-template-columns: minmax(0, 1fr); }
+        }
+        @media (max-width: 980px) {
+            .toc-toggle { display: inline-flex; }
+            .toc {
+                position: fixed;
+                top: var(--topbar);
+                left: 0;
+                right: 0;
+                z-index: 45;
+                width: auto;
+                height: auto;
+                max-height: calc(100vh - var(--topbar));
+                padding: 16px 20px 24px;
+                border-right: 0;
+                border-bottom: 1px solid var(--line);
+                background: var(--bg-deep);
+                transform: translateY(-115%);
+                transition: transform 0.2s ease;
+                box-shadow: 0 22px 40px rgba(0, 0, 0, 0.35);
+            }
+            .toc.open { transform: translateY(0); }
+            .toc-nav { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+            .toc-foot { display: none; }
+            main { padding: 32px 22px 70px; }
+            .topbar-note { display: none; }
+            .brand-text span { display: none; }
+        }
+        @media (max-width: 760px) {
+            .grid-2, .grid-3, .grid-4, .branches, .state-machine, .glossary, .file-list { grid-template-columns: 1fr; }
+            .hero-stats { grid-template-columns: 1fr; }
+            .calculator { grid-template-columns: 1fr; }
+            .arch-row { grid-template-columns: 1fr; gap: 5px; }
+            .arch-label { justify-content: flex-start; padding-left: 2px; }
+            .arch-arrow { margin-left: 0; }
+            .coord-strip { flex-direction: column; }
+            .coord-block + .coord-block { border-left: 0; border-top: 1px solid var(--line); }
+            .diagram svg { min-width: 680px; }
+            .topbar { padding: 0 14px; }
+            .topbar-right { gap: 8px; }
+            .theme-label { display: none; }
+            main { padding: 28px 16px 64px; }
+            .footer { padding: 22px 16px 34px; }
+            .toc-nav { grid-template-columns: 1fr; }
+        }
+        @media (max-width: 480px) {
+            .hero h1 { font-size: 2.25rem; }
+            .brand-text { font-size: 13px; }
+            .toc-toggle-label { display: none; }
+            .chunk-grid { gap: 2px; padding: 6px; }
+            .chunk-cell { font-size: 0; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            html { scroll-behavior: auto; }
+            * { transition: none !important; animation: none !important; }
+        }
+        @media print {
+            .topbar, .toc, .footer, .skip-link, .tabs, .calculator { display: none !important; }
+            body { background: #fff; color: #111; }
+            main { max-width: none; padding: 0; }
+            section { break-inside: avoid; border-top: 0; }
+            .card, .diagram, .table-wrap, .tabpanel, .callout { box-shadow: none; }
+            a { color: #111; }
+            .diagram svg { min-width: 0; }
+        }
+    </style>
+
+</head>
+<body>
+    <a class="skip-link" href="#main">Przejdź do treści</a>
+
+    <header class="topbar">
+        <div class="topbar-left">
+            <button class="icon-button toc-toggle" id="toc-toggle" type="button" aria-expanded="false" aria-controls="toc">
+                <span aria-hidden="true">☰</span>
+                <span class="toc-toggle-label">Spis treści</span>
+            </button>
+            <a class="brand" href="#start">
+                <span class="brand-mark" aria-hidden="true">3D</span>
+                <span class="brand-text">Minesweeper <span>/ architektura</span></span>
+            </a>
+        </div>
+        <div class="topbar-right">
+            <span class="topbar-note">Three.js · TypeScript · Vite</span>
+            <button class="icon-button theme-toggle" id="theme-toggle" type="button" aria-label="Przełącz motyw">
+                <span class="theme-icon" aria-hidden="true">◐</span>
+                <span class="theme-label">Motyw</span>
+            </button>
+        </div>
+    </header>
+
+    <div class="layout">
+        <aside class="toc" id="toc" aria-label="Spis treści">
+            <div class="toc-heading">Spis treści</div>
+            <nav class="toc-nav">
+                <a href="#start"><span>00</span>Start</a>
+                <a href="#tl-dr"><span>01</span>Trzy filary</a>
+                <a href="#sterowanie"><span>02</span>Sterowanie i HUD</a>
+                <a href="#mapa-modulow"><span>03</span>Mapa modułów</a>
+                <a href="#start-aplikacji"><span>04</span>Start aplikacji</a>
+                <a href="#petla-klatki"><span>05</span>Pętla klatki</a>
+                <a href="#model-danych"><span>06</span>Model danych</a>
+                <a href="#otwieranie"><span>07</span>Otwieranie kafla</a>
+                <a href="#flagi-punktacja"><span>08</span>Flagi i punktacja</a>
+                <a href="#chunki"><span>09</span>Chunk streaming</a>
+                <a href="#wspolrzedne"><span>10</span>Współrzędne</a>
+                <a href="#teren"><span>11</span>Teren</a>
+                <a href="#bomby"><span>12</span>Bomby</a>
+                <a href="#render-chunka"><span>13</span>Render chunka</a>
+                <a href="#mgla"><span>14</span>Mgła</a>
+                <a href="#markery"><span>15</span>Markery i dekoracje</a>
+                <a href="#assety"><span>16</span>Assety</a>
+                <a href="#wydajnosc"><span>17</span>Wydajność</a>
+                <a href="#pulapki"><span>18</span>Pułapki</a>
+                <a href="#czytanie-kodu"><span>19</span>Ścieżka czytania</a>
+                <a href="#slownik"><span>20</span>Słownik</a>
+            </nav>
+            <div class="toc-foot">
+                <p>Dokument statyczny. Otwiera się bez serwera i bez internetu.</p>
+                <p class="mono">docs/walkthrough.html</p>
+            </div>
+        </aside>
+
+        <main id="main">
+            <section class="hero" id="start">
+                <div class="eyebrow">walkthrough · three.js + typescript + vite</div>
+                <h1>3D Minesweeper<span>architektura i mechaniki</span></h1>
+                <p class="lead">
+                    Nieskończona plansza sapera na proceduralnym heightmapie. Świat istnieje tylko wokół gracza:
+                    chunki są budowane i usuwane w locie, bomby wynikają z hasha współrzędnych, a każdy odkryty
+                    kafel zmienia mgłę, marker, dekorację i dostępny obszar. Ten dokument przechodzi przez kod
+                    w kolejności, w której te mechaniki powstają.
+                </p>
+                <div class="hero-stats">
+                    <div class="hero-stat"><strong>∞</strong><span>Plansza bez rozmiaru. Stan trzyma tylko kafle, których dotknął gracz.</span></div>
+                    <div class="hero-stat"><strong>7×7</strong><span>Chunki w promieniu 3 wokół gracza; starsze są usuwane z GPU.</span></div>
+                    <div class="hero-stat"><strong>13%</strong><span>Gęstość bomb z deterministycznego hasha, nie z listy bomb.</span></div>
+                </div>
+                <div class="callout">
+                    <strong>Jak czytać dokument.</strong> Najpierw warstwy i przepływ sterowania, potem stan gry,
+                    na końcu generacja świata i render. Nazwy plików i symboli są dokładne. Wszystkie liczby
+                    pochodzą z kodu: <code>tileSize = 35</code>, <code>CHUNK_SIZE = 16</code>,
+                    <code>CHUNK_RADIUS = 3</code>, <code>ACCESS_MARGIN = 3</code>.
+                </div>
+            </section>
+
+            <section id="tl-dr">
+                <div class="section-kicker"><span>01</span> Trzy filary</div>
+                <h2>Co naprawdę robi ta aplikacja</h2>
+                <p class="lead">
+                    Gra wygląda jak klasyczny saper, ale nie ma planszy w pamięci. Ma trzy niezależne mechanizmy,
+                    które razem dają złudzenie nieskończonego, spójnego świata.
+                </p>
+                <div class="grid grid-2">
+                    <article class="card card-accent">
+                        <span class="card-label">Filar 1 · stan</span>
+                        <h3>Logiczna plansza to zbiory współrzędnych</h3>
+                        <p>
+                            <code>Board</code> nie przechowuje siatki kafli. Przechowuje cztery zbiory:
+                            <code>opened</code>, <code>flagged</code>, <code>safeZone</code> i
+                            <code>accessible</code>. Reszta planszy jest funkcją seeda i współrzędnych.
+                        </p>
+                        <p class="small muted">Skutek: pamięć rośnie z liczbą odwiedzonych kafli, nie z rozmiarem świata.</p>
+                    </article>
+                    <article class="card card-green">
+                        <span class="card-label">Filar 2 · generacja</span>
+                        <h3>Teren i bomby są deterministyczne</h3>
+                        <p>
+                            <code>Terrain</code> liczy wysokość z simplex noise, a <code>Board.isBomb</code> z
+                            <code>hash2(x, z, seed) &lt; 0.13</code>. Ten sam seed zawsze daje ten sam świat.
+                        </p>
+                        <p class="small muted">Skutek: nie trzeba zapisywać ani terenów, ani rozmieszczenia bomb.</p>
+                    </article>
+                    <article class="card card-violet">
+                        <span class="card-label">Filar 3 · strumieniowanie</span>
+                        <h3>Chunki istnieją tylko wokół gracza</h3>
+                        <p>
+                            <code>ChunkManager</code> buduje siatkę 7×7 chunków wokół aktualnego chunka gracza i
+                            usuwa je dopiero po przekroczeniu promienia. Każdy chunk ma własne meshe i lokalny
+                            układ współrzędnych.
+                        </p>
+                        <p class="small muted">Skutek: GPU dostaje ograniczoną liczbę obiektów, niezależnie od tego, jak daleko gracz zajdzie.</p>
+                    </article>
+                    <article class="card card-amber">
+                        <span class="card-label">Konsekwencja · podział</span>
+                        <h3>Reguły, widok i świat są rozdzielone</h3>
+                        <p>
+                            <code>Session</code> zna punktację i timer, ale nie dotyka DOM. <code>Game</code> jest
+                            composition rootem i widokiem. <code>Board</code> zna stan, a <code>Chunk</code>
+                            odpowiada za meshe.
+                        </p>
+                        <p class="small muted">Skutek: reguły można czytać bez Three.js, a render bez zasad gry.</p>
+                    </article>
+                </div>
+
+                <h3>Trzy zdania o przepływie</h3>
+                <div class="flow">
+                    <div class="flow-step">
+                        <div class="flow-num">1</div>
+                        <div class="flow-body">
+                            <strong>Klik trafia w kafel przez raycast.</strong>
+                            <p><code>Player</code> rzuca promień ze środka kamery w <code>chunkManager.meshList</code>, przelicza punkt na współrzędne siatki i zwraca <code>Tile</code>.</p>
+                        </div>
+                    </div>
+                    <div class="flow-step">
+                        <div class="flow-num">2</div>
+                        <div class="flow-body">
+                            <strong>Session decyduje, co wolno zrobić.</strong>
+                            <p>Sprawdza <code>over</code>, <code>accessible</code>, flagę i stan otwarcia. Pierwszy ruch tworzy strefę bezpieczną 3×3 i startuje timer.</p>
+                        </div>
+                    </div>
+                    <div class="flow-step">
+                        <div class="flow-num">3</div>
+                        <div class="flow-body">
+                            <strong>Tile zmienia stan, Chunk zmienia obraz.</strong>
+                            <p><code>Tile.reveal()</code> dopisuje kafel do <code>Board.opened</code>, uruchamia fade mgły, rejestruje marker i ukrywa dekoracje pod markerem.</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section id="sterowanie">
+                <div class="section-kicker"><span>02</span> Sterowanie i HUD</div>
+                <h2>Jak gracz wchodzi w interakcję</h2>
+                <p class="lead">
+                    Sterowanie jest w całości w <code>PlayerController</code>. Kamera jest pierwszoosobowa, a
+                    interakcja zawsze odbywa się przez środek ekranu — mysz nie jest rzucana w dowolne miejsce.
+                </p>
+
+                <div class="table-wrap">
+                    <table>
+                        <thead><tr><th>Wejście</th><th>Akcja</th><th> Szczegół</th></tr></thead>
+                        <tbody>
+                            <tr><td><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> / strzałki</td><td>Ruch</td><td><code>moveForward</code> i <code>moveRight</code> z <code>PointerLockControls</code></td></tr>
+                            <tr><td><kbd>Shift</kbd></td><td>Sprint</td><td>Prędkość rośnie z 1.3 do 1.9 na klatkę; ruch nie jest skalowany deltą</td></tr>
+                            <tr><td><kbd>Space</kbd></td><td>Widok z lotu ptaka</td><td>Przełącza <code>isBirdEye</code>; kamera celuje w centroid otwartych kafli</td></tr>
+                            <tr><td><kbd>E</kbd> / <kbd>Q</kbd></td><td>Wyżej / niżej</td><td><code>heightOffset</code> ±250 na sekundę, clamp do ±3000</td></tr>
+                            <tr><td>LPM</td><td>Odkryj kafel</td><td><code>Session.open(tile)</code>, tylko gdy pointer jest zablokowany</td></tr>
+                            <tr><td>PPM</td><td>Postaw / zdejmij flagę</td><td><code>Session.toggleFlag(tile)</code></td></tr>
+                            <tr><td><kbd>R</kbd></td><td>Restart</td><td>Nowy seed, nowy teren, nowa sesja</td></tr>
+                            <tr><td>Klik</td><td>Zablokuj celownik</td><td>Pierwszy klik tylko blokuje wskaźnik; nie otwiera kafla</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="grid grid-2">
+                    <div class="card">
+                        <span class="card-label">HUD</span>
+                        <h3>Elementy adresowane po ID</h3>
+                        <ul>
+                            <li><code>#points</code> — punkty, aktualizowane po każdej zmianie.</li>
+                            <li><code>#minesCount</code> — liczba odkrytych kafli, nie liczba min.</li>
+                            <li><code>#timeCount</code> — sekundy od pierwszego otwarcia.</li>
+                            <li><code>#pointsChangeContainer</code> — badge z deltą punktów na 800 ms.</li>
+                            <li><code>#crosshair</code> — stan <code>targeted</code>, gdy patrzysz na dostępny kafel.</li>
+                            <li><code>#popup</code> i <code>#floating-restart-btn</code> — ekran końca i powrót do gry.</li>
+                        </ul>
+                    </div>
+                    <div class="card">
+                        <span class="card-label">Ważne zachowanie</span>
+                        <h3>Po przegranej nadal można się rozglądać</h3>
+                        <p>
+                            Gdy <code>session.over</code> jest prawdziwe, kliknięcie ponownie blokuje wskaźnik,
+                            ale <code>Session.open</code> i <code>toggleFlag</code> od razu kończą działanie.
+                            Gracz może obejrzeć odkrytą mapę, ale nie może już zmieniać planszy.
+                        </p>
+                        <p class="small muted">
+                            <kbd>Escape</kbd> zamyka popup tylko po przegranej; wtedy pojawia się pływający
+                            przycisk restartu.
+                        </p>
+                    </div>
+                </div>
+
+                <details class="code-block">
+                    <summary>Pseudo-kod obsługi kliknięcia (PlayerController)</summary>
+<pre><code>if (session.over) {
+    if (!controls.isLocked) controls.lock()
+    return
+}
+
+if (!controls.isLocked) {
+    controls.lock()
+    return
+}
+
+const tile = player.tileLookedAt
+if (!tile) return
+if (event.button === 0) session.open(tile)
+if (event.button === 2) session.toggleFlag(tile)</code></pre>
+                </details>
+            </section>
+            <section id="mapa-modulow">
+                <div class="section-kicker"><span>03</span> Mapa modułów</div>
+                <h2>Sześć warstw, jeden kierunek zależności</h2>
+                <p class="lead">
+                    Zależności płyną z góry na dół: bootstrap tworzy runtime, runtime tworzy model świata,
+                    model świata tworzy meshe. Warstwy niższe nie znają reguł gry. To najważniejsza reguła
+                    architektoniczna projektu.
+                </p>
+
+                <div class="arch" aria-label="Diagram warstw modułów">
+                    <div class="arch-row">
+                        <div class="arch-label">Bootstrap</div>
+                        <div class="arch-cards">
+                            <div class="mod util"><strong>index.ts</strong><span>montuje <code>Game</code> w <code>#root</code></span><span class="path">src/index.ts</span></div>
+                            <div class="mod util"><strong>index.html</strong><span>HUD, crosshair, legenda klawiszy</span><span class="path">index.html</span></div>
+                            <div class="mod util"><strong>style.css</strong><span>wygląd HUD i popupów</span><span class="path">src/style.css</span></div>
+                        </div>
+                    </div>
+                    <div class="arch-arrow">tworzy</div>
+                    <div class="arch-row">
+                        <div class="arch-label">Runtime</div>
+                        <div class="arch-cards">
+                            <div class="mod runtime"><strong>Game</strong><span>scena, światła, kamera, pętla rAF, popupy; implementuje <code>SessionView</code></span><span class="path">components/Game.ts</span></div>
+                            <div class="mod runtime"><strong>Renderer</strong><span><code>WebGLRenderer</code> z rozmiarem okna, bez cieni</span><span class="path">components/Renderer.ts</span></div>
+                        </div>
+                    </div>
+                    <div class="arch-arrow">konstruuje i aktualizuje</div>
+                    <div class="arch-row">
+                        <div class="arch-label">Sterowanie</div>
+                        <div class="arch-cards">
+                            <div class="mod view"><strong>PlayerController</strong><span>ruch, pointer lock, klawisze, kliknięcia, wysokość kamery</span><span class="path">components/PlayerController.ts</span></div>
+                            <div class="mod view"><strong>Player</strong><span>raycast środka kamery, <code>tileLookedAt</code>, crosshair</span><span class="path">components/Player.ts</span></div>
+                        </div>
+                    </div>
+                    <div class="arch-arrow">deleguje reguły</div>
+                    <div class="arch-row">
+                        <div class="arch-label">Reguły</div>
+                        <div class="arch-cards">
+                            <div class="mod rules"><strong>Session</strong><span>otwieranie, flagi, punkty, timer, game over; zero DOM</span><span class="path">components/Session.ts</span></div>
+                        </div>
+                    </div>
+                    <div class="arch-arrow">czyta i zapisuje stan</div>
+                    <div class="arch-row">
+                        <div class="arch-label">Model świata</div>
+                        <div class="arch-cards">
+                            <div class="mod world"><strong>Board</strong><span>zbiory współrzędnych, seed, centroid, dostępność</span><span class="path">components/board/Board.ts</span></div>
+                            <div class="mod world"><strong>Tile</strong><span>wartość, otwarcie, flaga; brak geometrii</span><span class="path">components/board/Tile.ts</span></div>
+                            <div class="mod world"><strong>ChunkManager</strong><span>streaming, <code>meshList</code>, cykl życia chunków</span><span class="path">components/board/ChunkManager.ts</span></div>
+                            <div class="mod world"><strong>Chunk</strong><span>grupa meshy, mgła, markery, dekoracje, grzyby</span><span class="path">components/board/Chunk.ts</span></div>
+                        </div>
+                    </div>
+                    <div class="arch-arrow">buduje obraz</div>
+                    <div class="arch-row">
+                        <div class="arch-label">Generacja i render</div>
+                        <div class="arch-cards">
+                            <div class="mod view"><strong>Terrain</strong><span>wysokości, kolory, cache, <code>heightAtWorld</code></span><span class="path">board/Terrain.ts</span></div>
+                            <div class="mod view"><strong>TerrainSurface</strong><span>wspólna siatka dla chunka i horyzontu</span><span class="path">board/TerrainSurface.ts</span></div>
+                            <div class="mod view"><strong>Fog</strong><span>wspólna tekstura chmur</span><span class="path">board/Fog.ts</span></div>
+                            <div class="mod view"><strong>Marker</strong><span>bloom planty i spore litter, scalony mesh</span><span class="path">board/Marker.ts</span></div>
+                            <div class="mod view"><strong>Decoration</strong><span>GLB, instancing, ukrywanie pod markerami</span><span class="path">board/Decoration.ts</span></div>
+                            <div class="mod view"><strong>BombMushroom</strong><span>instancjonowany grzyb bomby</span><span class="path">board/BombMushroom.ts</span></div>
+                            <div class="mod view"><strong>Flag</strong><span>OBJ/MTL lub fallback, mesh na scenie</span><span class="path">board/Flag.ts</span></div>
+                            <div class="mod view"><strong>Horizon</strong><span>zgrubny daleki teren (obecnie niewidoczny)</span><span class="path">board/Horizon.ts</span></div>
+                        </div>
+                    </div>
+                    <div class="arch-arrow">korzysta</div>
+                    <div class="arch-row">
+                        <div class="arch-label">Utility</div>
+                        <div class="arch-cards">
+                            <div class="mod util"><strong>coords.ts</strong><span><code>CHUNK_SIZE</code>, <code>packKey</code>, <code>hash2</code></span><span class="path">utils/coords.ts</span></div>
+                            <div class="mod util"><strong>random.ts</strong><span><code>mulberry32</code></span><span class="path">utils/random.ts</span></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="callout ok">
+                    <strong>Kierunek zależności.</strong> <code>Session</code> zna tylko <code>Board</code> i
+                    <code>Tile</code>. <code>Board</code> nie zna DOM. <code>Chunk</code> nie zna punktacji.
+                    <code>Game</code> jest jedynym miejscem, które łączy reguły z widokiem.
+                </div>
+
+                <details class="code-block">
+                    <summary>Kolejność konstrukcji w Game.createWorld()</summary>
+<pre><code>this.board = new Board(this)
+this.horizon = new Horizon(this.board)
+// this.scene.add(this.horizon)  ← zakomentowane
+
+this.session = new Session(this.board, this)
+this.player = new Player(this)
+this.playerController = new PlayerController(this)</code></pre>
+                </details>
+            </section>
+
+            <section id="start-aplikacji">
+                <div class="section-kicker"><span>04</span> Start aplikacji</div>
+                <h2>Od <code>#root</code> do pierwszej klatki</h2>
+                <p class="lead">
+                    <code>Game</code> jest composition rootem. W konstruktorze tworzy scenę i wszystkie
+                    zależności, renderuje początkowy HUD, a następnie wchodzi w pętlę. Assety ładują się
+                    asynchronicznie i same zgłaszają, kiedy przebudować świat.
+                </p>
+
+                <div class="diagram">
+                    <svg viewBox="0 0 1040 620" role="img" aria-labelledby="seq-start-title seq-start-desc">
+                        <title id="seq-start-title">Sekwencja startu aplikacji</title>
+                        <desc id="seq-start-desc">Game tworzy Board, ChunkManager, Session, Player i PlayerController, potem renderuje HUD i wchodzi w pętlę.</desc>
+                        <style>
+                            .dg-box { fill: var(--panel-2); stroke: var(--line-strong); stroke-width: 1.2; }
+                            .dg-box-accent { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.2; }
+                            .dg-title { fill: var(--text); font-family: var(--mono); font-size: 12px; font-weight: 700; }
+                            .dg-text { fill: var(--muted); font-family: var(--sans); font-size: 11px; }
+                            .dg-mono { fill: var(--text); font-family: var(--mono); font-size: 10.5px; }
+                            .dg-faint { fill: var(--faint); font-family: var(--sans); font-size: 10px; }
+                            .dg-life { stroke: var(--line-strong); stroke-width: 1; stroke-dasharray: 4 5; }
+                            .dg-arrow { stroke: var(--accent); stroke-width: 1.4; fill: none; }
+                            .dg-return { stroke: var(--faint); stroke-width: 1.2; fill: none; stroke-dasharray: 4 4; }
+                            .dg-self { stroke: var(--green); stroke-width: 1.3; fill: none; }
+                            .dg-note { fill: var(--panel); stroke: var(--line-strong); stroke-width: 1; }
+                        </style>
+                        <defs>
+                            <marker id="arr-start" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                                <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--accent)"/>
+                            </marker>
+                            <marker id="arr-start-return" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                                <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--faint)"/>
+                            </marker>
+                        </defs>
+
+                        <rect class="dg-box-accent" x="40" y="18" width="170" height="38" rx="8"/>
+                        <text class="dg-title" x="125" y="42" text-anchor="middle">Game</text>
+                        <rect class="dg-box" x="270" y="18" width="170" height="38" rx="8"/>
+                        <text class="dg-title" x="355" y="42" text-anchor="middle">Board</text>
+                        <rect class="dg-box" x="470" y="18" width="170" height="38" rx="8"/>
+                        <text class="dg-title" x="555" y="42" text-anchor="middle">ChunkManager</text>
+                        <rect class="dg-box" x="670" y="18" width="150" height="38" rx="8"/>
+                        <text class="dg-title" x="745" y="42" text-anchor="middle">Session</text>
+                        <rect class="dg-box" x="850" y="18" width="160" height="38" rx="8"/>
+                        <text class="dg-title" x="930" y="42" text-anchor="middle">PlayerController</text>
+
+                        <line class="dg-life" x1="125" y1="56" x2="125" y2="590"/>
+                        <line class="dg-life" x1="355" y1="56" x2="355" y2="590"/>
+                        <line class="dg-life" x1="555" y1="56" x2="555" y2="590"/>
+                        <line class="dg-life" x1="745" y1="56" x2="745" y2="590"/>
+                        <line class="dg-life" x1="930" y1="56" x2="930" y2="590"/>
+
+                        <line class="dg-arrow" x1="125" y1="92" x2="349" y2="92" marker-end="url(#arr-start)"/>
+                        <text class="dg-mono" x="135" y="84">new Board(game)</text>
+
+                        <path class="dg-self" d="M 355 118 h 54 v 26 h -54" marker-end="url(#arr-start)"/>
+                        <text class="dg-text" x="420" y="127">Terrain · Decoration · BombMushroom</text>
+
+                        <line class="dg-arrow" x1="355" y1="170" x2="549" y2="170" marker-end="url(#arr-start)"/>
+                        <text class="dg-mono" x="365" y="162">new ChunkManager(board)</text>
+
+                        <path class="dg-self" d="M 355 196 h 54 v 26 h -54" marker-end="url(#arr-start)"/>
+                        <text class="dg-text" x="420" y="205">seedStart() · update(spawn) · buildAround()</text>
+
+                        <path class="dg-self" d="M 125 238 h 54 v 26 h -54" marker-end="url(#arr-start)"/>
+                        <text class="dg-text" x="190" y="247">new Horizon(board)</text>
+                        <text class="dg-faint" x="190" y="260">scene.add jest zakomentowane</text>
+
+                        <line class="dg-arrow" x1="125" y1="296" x2="739" y2="296" marker-end="url(#arr-start)"/>
+                        <text class="dg-mono" x="135" y="288">new Session(board, this)</text>
+
+                        <path class="dg-self" d="M 125 324 h 54 v 26 h -54" marker-end="url(#arr-start)"/>
+                        <text class="dg-text" x="190" y="333">new Player(game)</text>
+
+                        <line class="dg-arrow" x1="125" y1="382" x2="924" y2="382" marker-end="url(#arr-start)"/>
+                        <text class="dg-mono" x="135" y="374">new PlayerController(game)</text>
+
+                        <line class="dg-arrow" x1="125" y1="418" x2="739" y2="418" marker-end="url(#arr-start)"/>
+                        <text class="dg-mono" x="135" y="410">getState()</text>
+                        <line class="dg-return" x1="739" y1="438" x2="131" y2="438" marker-end="url(#arr-start-return)"/>
+                        <text class="dg-text" x="445" y="432">SessionState</text>
+
+                        <path class="dg-self" d="M 125 464 h 54 v 26 h -54" marker-end="url(#arr-start)"/>
+                        <text class="dg-text" x="190" y="473">renderSession(state, 0) → DOM</text>
+
+                        <path class="dg-self" d="M 125 510 h 54 v 26 h -54" marker-end="url(#arr-start)"/>
+                        <text class="dg-text" x="190" y="519">render() → requestAnimationFrame</text>
+
+                        <rect class="dg-note" x="270" y="552" width="720" height="46" rx="8"/>
+                        <text class="dg-text" x="286" y="570">Asynchronicznie: Flag.preload() ustawia preloadedFlag; GLBy dekoracji wołają</text>
+                        <text class="dg-text" x="286" y="586">chunkManager.rebuildDecorations(); grzyb bomby woła chunk.refreshMarkers().</text>
+                    </svg>
+                    <p class="diagram-caption"><strong>Rys. 1.</strong> Start jest synchroniczny poza assetami. HUD dostaje pierwszy snapshot jeszcze przed pierwszą klatką.</p>
+                </div>
+
+                <div class="grid grid-3">
+                    <div class="card">
+                        <span class="card-label">Synchroniczne</span>
+                        <h3>Świat i gra</h3>
+                        <p class="small muted">Scena, światła, kamera, Board, Horizon, Session, Player, PlayerController. Wszystko gotowe przed pierwszym renderem.</p>
+                    </div>
+                    <div class="card">
+                        <span class="card-label">Asynchroniczne</span>
+                        <h3>Assety</h3>
+                        <p class="small muted">Flaga OBJ/MTL, 11 modeli natury, grzyb bomby. Każdy loader ma własny callback zakończenia.</p>
+                    </div>
+                    <div class="card">
+                        <span class="card-label">Efekt</span>
+                        <h3>Świat nie czeka</h3>
+                        <p class="small muted">Gra startuje natychmiast. Po załadowaniu modeli dekoracje i grzyby są wstawiane do istniejących chunków bez restartu.</p>
+                    </div>
+                </div>
+            </section>
+
+            <section id="petla-klatki">
+                <div class="section-kicker"><span>05</span> Pętla klatki</div>
+                <h2>Co dzieje się w każdym <code>requestAnimationFrame</code></h2>
+                <p class="lead">
+                    Pętla jest krótka i celowo jednowątkowa. Każda klatka aktualizuje sterowanie, raycast,
+                    streaming chunków i dopiero potem renderuje scenę.
+                </p>
+
+                <div class="diagram">
+                    <svg viewBox="0 0 1040 500" role="img" aria-labelledby="seq-frame-title seq-frame-desc">
+                        <title id="seq-frame-title">Sekwencja pojedynczej klatki</title>
+                        <desc id="seq-frame-desc">Game aktualizuje PlayerController, ten Player, potem Board i ChunkManager, a na końcu renderuje scenę.</desc>
+                        <style>
+                            .df-box { fill: var(--panel-2); stroke: var(--line-strong); stroke-width: 1.2; }
+                            .df-box-accent { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.2; }
+                            .df-title { fill: var(--text); font-family: var(--mono); font-size: 12px; font-weight: 700; }
+                            .df-mono { fill: var(--text); font-family: var(--mono); font-size: 10.5px; }
+                            .df-text { fill: var(--muted); font-family: var(--sans); font-size: 10.5px; }
+                            .df-faint { fill: var(--faint); font-family: var(--sans); font-size: 10px; }
+                            .df-life { stroke: var(--line-strong); stroke-width: 1; stroke-dasharray: 4 5; }
+                            .df-arrow { stroke: var(--accent); stroke-width: 1.4; fill: none; }
+                            .df-return { stroke: var(--faint); stroke-width: 1.2; fill: none; stroke-dasharray: 4 4; }
+                            .df-self { stroke: var(--green); stroke-width: 1.3; fill: none; }
+                        </style>
+                        <defs>
+                            <marker id="arr-frame" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                                <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--accent)"/>
+                            </marker>
+                            <marker id="arr-frame-return" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                                <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--faint)"/>
+                            </marker>
+                        </defs>
+
+                        <rect class="df-box-accent" x="34" y="18" width="150" height="38" rx="8"/>
+                        <text class="df-title" x="109" y="42" text-anchor="middle">Game</text>
+                        <rect class="df-box" x="238" y="18" width="178" height="38" rx="8"/>
+                        <text class="df-title" x="327" y="42" text-anchor="middle">PlayerController</text>
+                        <rect class="df-box" x="470" y="18" width="140" height="38" rx="8"/>
+                        <text class="df-title" x="540" y="42" text-anchor="middle">Player</text>
+                        <rect class="df-box" x="660" y="18" width="140" height="38" rx="8"/>
+                        <text class="df-title" x="730" y="42" text-anchor="middle">Board</text>
+                        <rect class="df-box" x="850" y="18" width="160" height="38" rx="8"/>
+                        <text class="df-title" x="930" y="42" text-anchor="middle">ChunkManager</text>
+
+                        <line class="df-life" x1="109" y1="56" x2="109" y2="470"/>
+                        <line class="df-life" x1="327" y1="56" x2="327" y2="470"/>
+                        <line class="df-life" x1="540" y1="56" x2="540" y2="470"/>
+                        <line class="df-life" x1="730" y1="56" x2="730" y2="470"/>
+                        <line class="df-life" x1="930" y1="56" x2="930" y2="470"/>
+
+                        <line class="df-arrow" x1="109" y1="92" x2="321" y2="92" marker-end="url(#arr-frame)"/>
+                        <text class="df-mono" x="119" y="84">update(delta)</text>
+
+                        <line class="df-arrow" x1="327" y1="128" x2="724" y2="128" marker-end="url(#arr-frame)"/>
+                        <text class="df-mono" x="337" y="120">isWorldAccessible(x, z)</text>
+                        <line class="df-return" x1="724" y1="148" x2="333" y2="148" marker-end="url(#arr-frame-return)"/>
+                        <text class="df-text" x="500" y="142">clamp ruchu do accessible</text>
+
+                        <line class="df-arrow" x1="327" y1="186" x2="534" y2="186" marker-end="url(#arr-frame)"/>
+                        <text class="df-mono" x="337" y="178">player.update(delta)</text>
+
+                        <line class="df-arrow" x1="540" y1="222" x2="924" y2="222" marker-end="url(#arr-frame)"/>
+                        <text class="df-mono" x="550" y="214">intersectObjects(meshList)</text>
+                        <line class="df-return" x1="924" y1="242" x2="546" y2="242" marker-end="url(#arr-frame-return)"/>
+                        <text class="df-text" x="700" y="236">Tile | null → tileLookedAt</text>
+
+                        <line class="df-arrow" x1="109" y1="292" x2="724" y2="292" marker-end="url(#arr-frame)"/>
+                        <text class="df-mono" x="119" y="284">board.update(camera.x, camera.z, delta)</text>
+
+                        <line class="df-arrow" x1="730" y1="328" x2="924" y2="328" marker-end="url(#arr-frame)"/>
+                        <text class="df-mono" x="740" y="320">chunkManager.update(...)</text>
+
+                        <path class="df-self" d="M 930 354 h 42 v 24 h -42" marker-end="url(#arr-frame)"/>
+                        <text class="df-text" x="980" y="363">buildAround po zmianie chunka</text>
+                        <text class="df-faint" x="980" y="376">chunk.update: fade i markery</text>
+
+                        <path class="df-self" d="M 109 412 h 42 v 24 h -42" marker-end="url(#arr-frame)"/>
+                        <text class="df-mono" x="165" y="421">renderer.render(scene, camera)</text>
+                        <text class="df-faint" x="165" y="435">horizon.update() nadal jest wołany</text>
+
+                        <text class="df-text" x="165" y="462">requestAnimationFrame(render) → następna klatka</text>
+                    </svg>
+                    <p class="diagram-caption"><strong>Rys. 2.</strong> <code>Player.update</code> jest wywoływany wewnątrz <code>PlayerController.update</code>, więc raycast odbywa się po ruchu kamery, ale przed streamingiem.</p>
+                </div>
+
+                <div class="table-wrap compact">
+                    <table>
+                        <thead><tr><th>Krok</th><th>Wywołanie</th><th>Odpowiedzialność</th></tr></thead>
+                        <tbody>
+                            <tr><td class="num">1</td><td><code>clock.getDelta()</code></td><td>Mierzy czas klatki.</td></tr>
+                            <tr><td class="num">2</td><td><code>playerController.update(delta)</code></td><td>Ruch tylko przy zablokowanym pointerze; clamp do <code>accessible</code>; E/Q; na końcu <code>player.update</code>.</td></tr>
+                            <tr><td class="num">3</td><td><code>player.update(delta)</code></td><td>Raycast środka kamery, aktualizacja <code>tileLookedAt</code> i klasy crosshaira.</td></tr>
+                            <tr><td class="num">4</td><td><code>board.update(x, z, delta)</code></td><td>Deleguje do <code>ChunkManager.update</code>: nowe chunki, usuwanie, fade mgły, przebudowa markerów.</td></tr>
+                            <tr><td class="num">5</td><td><code>horizon.update(x, z)</code></td><td>Przebudowa zgrubnego horyzontu po przejściu progu; mesh nie jest dodany do sceny.</td></tr>
+                            <tr><td class="num">6</td><td><code>renderer.render(scene, camera)</code></td><td>Rysuje scenę.</td></tr>
+                            <tr><td class="num">7</td><td><code>requestAnimationFrame</code></td><td>Planuje następną klatkę.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+            <section id="model-danych">
+                <div class="section-kicker"><span>06</span> Model danych</div>
+                <h2>Co jest stanem, a co tylko pochodną</h2>
+                <p class="lead">
+                    Cały projekt opiera się na jednym rozróżnieniu: stan gracza jest mały i trwały,
+                    a świat jest duży i liczony na żądanie. Dzięki temu restart jest tani, a chunk może
+                    zniknąć i wrócić bez utraty postępu.
+                </p>
+
+                <div class="table-wrap">
+                    <table>
+                        <thead><tr><th>Obiekt</th><th>Trzyma</th><th>Nie trzyma</th></tr></thead>
+                        <tbody>
+                            <tr>
+                                <td><code>Board</code></td>
+                                <td><code>opened</code>, <code>flagged</code>, <code>safeZone</code>, <code>accessible</code>, <code>seed</code>, <code>started</code>, <code>bombsRevealed</code>, suma współrzędnych i licznik otwartych</td>
+                                <td>Pełnej siatki kafli, geometrii, meshy.</td>
+                            </tr>
+                            <tr>
+                                <td><code>Session</code></td>
+                                <td><code>points</code>, <code>time</code>, <code>flagsPlaced</code>, <code>over</code>, uchwyt interwału timera</td>
+                                <td>DOM, sceny, chunków.</td>
+                            </tr>
+                            <tr>
+                                <td><code>ChunkManager</code></td>
+                                <td><code>Map&lt;chunkKey, Chunk&gt;</code>, płaska lista <code>meshList</code>, ostatni chunk gracza</td>
+                                <td>Stanu planszy; tylko odtwarza go z <code>Board</code>.</td>
+                            </tr>
+                            <tr>
+                                <td><code>Chunk</code></td>
+                                <td>16×16 <code>Tile</code>, grupę, terrain, fog, marker, dekoracje, grzyby, maskę mgły, kolejkę markerów</td>
+                                <td>Punktów, timera, decyzji o otwieraniu.</td>
+                            </tr>
+                            <tr>
+                                <td><code>Tile</code></td>
+                                <td><code>value</code>, <code>opened</code>, <code>computed</code>, współrzędne świata, <code>surfaceY</code>, flagę</td>
+                                <td>Własnego mesha; wszystko batched jest w chunku.</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="grid grid-2">
+                    <div class="card card-green">
+                        <span class="card-label">Stan trwały</span>
+                        <h3>Przetrwa usunięcie chunka</h3>
+                        <ul>
+                            <li><code>Board.opened</code> — które kafle są odkryte.</li>
+                            <li><code>Board.flagged</code> — które mają flagę.</li>
+                            <li><code>Board.safeZone</code> — 3×3 strefa pierwszego kliknięcia.</li>
+                            <li><code>Board.accessible</code> — gdzie gracz może chodzić i klikać.</li>
+                            <li><code>Board.seed</code> — cały świat i bomby.</li>
+                            <li><code>Board.bombsRevealed</code> — czy po przegranej pokazywać bomby w nowych chunkach.</li>
+                        </ul>
+                    </div>
+                    <div class="card card-amber">
+                        <span class="card-label">Stan pochodny</span>
+                        <h3>Odtwarzany przy każdym chunku</h3>
+                        <ul>
+                            <li>Wysokości terenu — z seeda i współrzędnych.</li>
+                            <li>Wartość kafla — z <code>isBomb</code> i 8 sąsiadów.</li>
+                            <li>Maska mgły — z <code>opened</code>, od razu bez animacji.</li>
+                            <li>Markery — z wartości kafli i pozycji świata.</li>
+                            <li>Dekoracje — z seeda chunka i pozycji kafli.</li>
+                            <li>Flagi — z <code>flagged</code>, jako mesh na scenie.</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <h3>Dlaczego wystarczą zbiory współrzędnych</h3>
+                <p>
+                    <code>packKey(x, z)</code> zamienia parę kafli na jedną liczbę całkowitą. To pozwala
+                    trzymać <code>Set&lt;number&gt;</code> zamiast obiektów i sprawdzać przynależność w czasie
+                    stałym. Zakres obejmuje mniej więcej ±131 072 kafle na osi.
+                </p>
+                <pre><code>// utils/coords.ts
+export function packKey(x: number, z: number): number {
+    return (x + 131072) * 262144 + (z + 131072)
+}
+
+export function hash2(x: number, z: number, seed: number): number {
+    let h = Math.imul(x | 0, 374761393)
+          ^ Math.imul(z | 0, 668265263)
+          ^ Math.imul(seed | 0, 1013904223)
+    h = Math.imul(h ^ (h >>> 13), 1274126177)
+    h = h ^ (h >>> 16)
+    return (h >>> 0) / 4294967296
+}</code></pre>
+
+                <div class="callout">
+                    <strong>Dwa różne „dostępne”.</strong> <code>isTileAccessible(gx, gz)</code> sprawdza
+                    kafel, a <code>isWorldAccessible(worldX, worldZ)</code> przelicza pozycję kamery na kafel
+                    i woła to samo. Ruch gracza i kliknięcia używają tego samego zbioru <code>accessible</code>.
+                </div>
+            </section>
+
+            <section id="otwieranie">
+                <div class="section-kicker"><span>07</span> Otwieranie kafla</div>
+                <h2>Od promienia do zmiany świata</h2>
+                <p class="lead">
+                    Otwarcie kafla to najgęstszy przepływ w grze. Zaczyna się w raycaście, przechodzi przez
+                    walidację w <code>Session</code>, a kończy na mgle, markerze i punkcie. Poniżej dokładna
+                    kolejność i wszystkie warunki wyjścia.
+                </p>
+
+                <div class="flow">
+                    <div class="flow-step">
+                        <div class="flow-num">1</div>
+                        <div class="flow-body">
+                            <strong>Kliknięcie LPM.</strong>
+                            <p>Jeśli pointer nie jest zablokowany, klik tylko blokuje wskaźnik i kończy się. Po przegranej ten sam klik tylko ponownie blokuje wskaźnik — bez interakcji z kaflem.</p>
+                        </div>
+                    </div>
+                    <div class="flow-step">
+                        <div class="flow-num">2</div>
+                        <div class="flow-body">
+                            <strong>Raycast środka kamery.</strong>
+                            <p><code>Player.getRaycastTarget()</code> rzuca promień w <code>chunkManager.meshList</code>, czyli tylko w terrain meshe. Trafienie jest przeliczane przez <code>Math.floor(point.x / tileSize)</code> i <code>board.getTile(gx, gz)</code>. Limit dystansu to 12000, bo kamera może wznieść się do 4000.</p>
+                        </div>
+                    </div>
+                    <div class="flow-step">
+                        <div class="flow-num">3</div>
+                        <div class="flow-body">
+                            <strong>Walidacja w Session.open().</strong>
+                            <p>Kolejno: <code>over</code>, <code>isTileAccessible</code>, flaga, <code>isOpen</code>. Każdy warunek kończy metodę bez wyjątku i bez zmiany stanu.</p>
+                        </div>
+                    </div>
+                    <div class="flow-step">
+                        <div class="flow-num">4</div>
+                        <div class="flow-body">
+                            <strong>Pierwszy ruch uruchamia grę.</strong>
+                            <p><code>Board.ensureStarted(x, z)</code> dopisuje 3×3 kafle do <code>safeZone</code> i ustawia <code>started = true</code>. <code>Session.startTimer()</code> startuje interwał 1 s. Timer nie działa przed pierwszym otwarciem.</p>
+                        </div>
+                    </div>
+                    <div class="flow-step">
+                        <div class="flow-num">5</div>
+                        <div class="flow-body">
+                            <strong>Wartość i odkrycie.</strong>
+                            <p><code>tile.computeValue()</code> sprawdza bombę i liczy 8 sąsiadów. <code>tile.reveal()</code> dopisuje kafel do <code>Board.opened</code>, rozszerza <code>accessible</code> o margines 3, uruchamia fade mgły, rejestruje marker i ukrywa dekoracje pod markerem.</p>
+                        </div>
+                    </div>
+                    <div class="flow-step">
+                        <div class="flow-num">6</div>
+                        <div class="flow-body">
+                            <strong>Rozgałęzienie wyniku.</strong>
+                            <p>Bomba kończy grę. Pusty kafel uruchamia flood fill. Kafel z liczbą dostaje punkty równe liczbie sąsiednich bomb.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="branches">
+                    <article class="branch bomb">
+                        <h4>Bomba</h4>
+                        <p><code>award(-250)</code>, potem <code>gameOver()</code>. Bomba zostaje odkryta, a <code>Board.revealAllBombs()</code> pokazuje wszystkie bomby w załadowanych chunkach.</p>
+                        <span class="score">-250 pkt</span>
+                    </article>
+                    <article class="branch empty">
+                        <h4>Pusty kafel</h4>
+                        <p><code>award(1)</code> i <code>floodOpen(tile)</code>. Algorytm iteracyjny ze stosem otwiera sąsiadów, dopóki trafia na puste kafle; liczby odkrywa, ale nie rozchodzi się dalej.</p>
+                        <span class="score">+1 za każdy pusty</span>
+                    </article>
+                    <article class="branch number">
+                        <h4>Liczba 1–8</h4>
+                        <p>Kafel dostaje wartość liczby sąsiadów. Punkty rosną o tę wartość. Marker bloom ma dokładnie tyle kwiatów, ile wynosi liczba.</p>
+                        <span class="score">+1 … +8 pkt</span>
+                    </article>
+                </div>
+
+                <h3>Flood fill</h3>
+                <p>
+                    <code>Session.floodOpen</code> nie jest rekurencyjny. Używa stosu <code>Tile[]</code> i
+                    odkrywa sąsiadów tylko wtedy, gdy nie są otwarci i nie mają flagi. Bomby nie są odkrywane
+                    przez flood fill — jedyny sposób ich zobaczenia to wejście na bombę albo koniec gry.
+                </p>
+                <details class="code-block" open>
+                    <summary>Session.floodOpen() — uproszczony kod</summary>
+<pre><code>const stack: Tile[] = [origin]
+while (stack.length > 0) {
+    const tile = stack.pop()!
+    for (const neighbour of tile.getNeighbours()) {
+        if (neighbour.isOpen() || neighbour.flag.isVisible()) continue
+        neighbour.computeValue()
+        neighbour.reveal()
+
+        if (neighbour.value === 'empty') {
+            this.award(1)
+            stack.push(neighbour)
+        } else if (neighbour.value !== 'bomb') {
+            this.award(neighbour.value as number)
+        }
+    }
+}</code></pre>
+                </details>
+
+                <div class="callout warn">
+                    <strong>Flood fill a granica chunków.</strong> <code>Tile.getNeighbours()</code> używa
+                    <code>Board.getTile</code>, które zwraca <code>null</code>, jeśli chunk sąsiada nie jest
+                    załadowany. W praktyce <code>ACCESS_MARGIN = 3</code> sprawia, że otwarte kafle i ich
+                    sąsiedzi mieszczą się w załadowanym obszarze. To założenie, nie twarda gwarancja.
+                </div>
+
+                <div class="callout">
+                    <strong>Raycast nie widzi markerów ani dekoracji.</strong> <code>meshList</code> zawiera
+                    wyłącznie <code>terrainMesh</code> każdego chunka. Marker i grzyb mają wyłączony raycast,
+                    a mgła nie jest w liście. Dzięki temu wysoka trawa nie kradnie kliknięcia.
+                </div>
+            </section>
+
+            <section id="flagi-punktacja">
+                <div class="section-kicker"><span>08</span> Flagi, punkty, koniec gry</div>
+                <h2>Reguły sesji bez DOM</h2>
+                <p class="lead">
+                    <code>Session</code> jest jedynym miejscem, które wie, ile co jest warte. <code>Game</code>
+                    dostaje gotowy snapshot i tylko go wyświetla. Nie ma ekranu zwycięstwa, bo plansza jest
+                    nieskończona — jest tylko przegrana i restart.
+                </p>
+
+                <div class="table-wrap">
+                    <table>
+                        <thead><tr><th>Akcja</th><th>Warunek</th><th>Punkty</th><th>Efekt</th></tr></thead>
+                        <tbody>
+                            <tr><td>Otwórz pusty kafel</td><td>nieotwarty, bez flagi, dostępny</td><td class="num">+1</td><td>Flood fill i punkt za każdy pusty sąsiad.</td></tr>
+                            <tr><td>Otwórz liczbę</td><td>nieotwarty, bez flagi, dostępny</td><td class="num">+1…+8</td><td>Marker bloom z odpowiednią liczbą kwiatów.</td></tr>
+                            <tr><td>Otwórz bombę</td><td>nieotwarty, bez flagi, dostępny</td><td class="num">−250</td><td>Game over, odkrycie wszystkich bomb.</td></tr>
+                            <tr><td>Postaw flagę na bombie</td><td>kafel nieotwarty</td><td class="num">+50</td><td>Flaga widoczna, <code>flagsPlaced++</code>.</td></tr>
+                            <tr><td>Postaw flagę na bezpiecznym</td><td>kafel nieotwarty</td><td class="num">−75</td><td>Flaga widoczna, <code>flagsPlaced++</code>.</td></tr>
+                            <tr><td>Zdejmij flagę z bomby</td><td>flaga widoczna</td><td class="num">−50</td><td>Flaga znika, <code>flagsPlaced--</code>.</td></tr>
+                            <tr><td>Zdejmij flagę z bezpiecznego</td><td>flaga widoczna</td><td class="num">+75</td><td>Flaga znika, <code>flagsPlaced--</code>.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="callout warn">
+                    <strong>Punkty mogą być ujemne.</strong> HUD pokazuje kolor zielony dla dodatnich i
+                    czerwony dla ujemnych. <code>#minesCount</code> to liczba odkrytych kafli, nie liczba
+                    min; <code>flagsPlaced</code> istnieje w stanie sesji, ale nie jest osobnym licznikiem
+                    w HUD.
+                </div>
+
+                <h3>Maszyna stanów sesji</h3>
+                <div class="state-machine">
+                    <div class="state before">
+                        <span class="state-tag">before start</span>
+                        <h4>Przed pierwszym ruchem</h4>
+                        <p><code>started = false</code>, <code>time = 0</code>, <code>over = false</code>. Bomby zawsze zwracają <code>false</code>, więc cała plansza jest bezpieczna do pierwszego kliknięcia.</p>
+                    </div>
+                    <div class="state running">
+                        <span class="state-tag">running</span>
+                        <h4>Gra trwa</h4>
+                        <p>Timer tyka co sekundę. Otwieranie i flagi zmieniają punkty. <code>started = true</code> i <code>safeZone</code> 3×3 jest już ustalona.</p>
+                    </div>
+                    <div class="state over">
+                        <span class="state-tag">game over</span>
+                        <h4>Przegrana</h4>
+                        <p><code>over = true</code>, timer stop, wszystkie bomby odkryte. Popup pokazuje wynik, czas i liczbę odkrytych kafli. Można oglądać mapę, nie można grać.</p>
+                    </div>
+                </div>
+
+                <div class="tabs" data-tabs>
+                    <div class="tablist" role="tablist" aria-label="Zachowanie końca gry i restartu">
+                        <button class="tab" type="button" role="tab" id="tab-over" aria-controls="panel-over" aria-selected="true">Koniec gry</button>
+                        <button class="tab" type="button" role="tab" id="tab-restart" aria-controls="panel-restart" aria-selected="false">Restart</button>
+                        <button class="tab" type="button" role="tab" id="tab-map" aria-controls="panel-map" aria-selected="false">Oglądanie mapy</button>
+                    </div>
+                    <div class="tabpanel" id="panel-over" role="tabpanel" aria-labelledby="tab-over">
+                        <p><code>Session.gameOver()</code> ustawia <code>over</code>, zatrzymuje timer, woła <code>Board.revealAllBombs()</code> i przekazuje snapshot do <code>Game.showGameOver()</code>. Widok odblokowuje pointer i tworzy popup z wynikiem.</p>
+                        <p class="small muted"><code>revealAllBombs()</code> iteruje po załadowanych chunkach. Nowe chunki po przegranej sprawdzają <code>Board.bombsRevealed</code> w <code>restoreState</code>.</p>
+                    </div>
+                    <div class="tabpanel" id="panel-restart" role="tabpanel" aria-labelledby="tab-restart" hidden>
+                        <p><code>Game.restart()</code> usuwa popup i pływający przycisk, woła <code>board.restart()</code>, <code>horizon.reseed()</code>, <code>playerController.resetPosition()</code> i <code>session.restart()</code>.</p>
+                        <p class="small muted"><code>Board.restart()</code> czyści zbiory, losuje nowy seed, reseeduje teren i dekoracje, czyści wszystkie chunki i buduje je od nowa wokół spawnu.</p>
+                    </div>
+                    <div class="tabpanel" id="panel-map" role="tabpanel" aria-labelledby="tab-map" hidden>
+                        <p>„View Map” zamyka popup i pokazuje pływający przycisk restartu. Kliknięcie w scenę ponownie blokuje pointer, więc można się rozglądać i oglądać odkryte bomby.</p>
+                        <p class="small muted">Wejście w interakcję jest zablokowane przez <code>session.over</code> w <code>Session.open</code> i <code>toggleFlag</code>.</p>
+                    </div>
+                </div>
+
+                <details class="code-block">
+                    <summary>Session.toggleFlag() — punkty i kolejność</summary>
+<pre><code>if (this.over) return
+if (!this.board.isTileAccessible(tile.x, tile.z)) return
+if (tile.isOpen()) return
+
+if (tile.flag.isVisible()) {
+    tile.flag.setVisible(false)
+    this.board.removeFlag(tile.x, tile.z)
+    this.flagsPlaced = Math.max(0, this.flagsPlaced - 1)
+    this.award(this.isBombTile(tile) ? -50 : 75)
+} else {
+    tile.flag.setVisible(true)
+    this.board.addFlag(tile.x, tile.z)
+    this.flagsPlaced++
+    this.award(this.isBombTile(tile) ? 50 : -75)
+}
+this.render(0)</code></pre>
+                </details>
+            </section>
+            <section id="chunki">
+                <div class="section-kicker"><span>09</span> Chunk streaming</div>
+                <h2>Świat, który istnieje tylko wokół gracza</h2>
+                <p class="lead">
+                    Chunk to kwadrat 16×16 kafli, czyli 560×560 jednostek świata. <code>ChunkManager</code>
+                    utrzymuje siatkę 7×7 wokół chunka gracza, a stare chunki usuwa dopiero po przekroczeniu
+                    promienia. Dzięki temu można iść w nieskończoność bez rosnącej liczby meshy.
+                </p>
+
+                <div class="chunk-wrap">
+                    <div class="chunk-grid" role="img" aria-label="Siatka 9 na 9 chunków: środek to chunk gracza, wewnętrzne 7 na 7 jest budowane, zewnętrzny pierścień jest buforem do usunięcia.">
+                        <div class="chunk-cell buffer"></div><div class="chunk-cell buffer"></div><div class="chunk-cell buffer"></div><div class="chunk-cell buffer"></div><div class="chunk-cell buffer"></div><div class="chunk-cell buffer"></div><div class="chunk-cell buffer"></div><div class="chunk-cell buffer"></div><div class="chunk-cell buffer"></div>
+                        <div class="chunk-cell buffer"></div><div class="chunk-cell built">3</div><div class="chunk-cell built">3</div><div class="chunk-cell built">3</div><div class="chunk-cell built">3</div><div class="chunk-cell built">3</div><div class="chunk-cell built">3</div><div class="chunk-cell built">3</div><div class="chunk-cell buffer"></div>
+                        <div class="chunk-cell buffer"></div><div class="chunk-cell built">3</div><div class="chunk-cell built">2</div><div class="chunk-cell built">2</div><div class="chunk-cell built">2</div><div class="chunk-cell built">2</div><div class="chunk-cell built">2</div><div class="chunk-cell built">3</div><div class="chunk-cell buffer"></div>
+                        <div class="chunk-cell buffer"></div><div class="chunk-cell built">3</div><div class="chunk-cell built">2</div><div class="chunk-cell built">1</div><div class="chunk-cell built">1</div><div class="chunk-cell built">1</div><div class="chunk-cell built">2</div><div class="chunk-cell built">3</div><div class="chunk-cell buffer"></div>
+                        <div class="chunk-cell buffer"></div><div class="chunk-cell built">3</div><div class="chunk-cell built">2</div><div class="chunk-cell built">1</div><div class="chunk-cell center">C</div><div class="chunk-cell built">1</div><div class="chunk-cell built">2</div><div class="chunk-cell built">3</div><div class="chunk-cell buffer"></div>
+                        <div class="chunk-cell buffer"></div><div class="chunk-cell built">3</div><div class="chunk-cell built">2</div><div class="chunk-cell built">1</div><div class="chunk-cell built">1</div><div class="chunk-cell built">1</div><div class="chunk-cell built">2</div><div class="chunk-cell built">3</div><div class="chunk-cell buffer"></div>
+                        <div class="chunk-cell buffer"></div><div class="chunk-cell built">3</div><div class="chunk-cell built">2</div><div class="chunk-cell built">2</div><div class="chunk-cell built">2</div><div class="chunk-cell built">2</div><div class="chunk-cell built">2</div><div class="chunk-cell built">3</div><div class="chunk-cell buffer"></div>
+                        <div class="chunk-cell buffer"></div><div class="chunk-cell built">3</div><div class="chunk-cell built">3</div><div class="chunk-cell built">3</div><div class="chunk-cell built">3</div><div class="chunk-cell built">3</div><div class="chunk-cell built">3</div><div class="chunk-cell built">3</div><div class="chunk-cell buffer"></div>
+                        <div class="chunk-cell buffer"></div><div class="chunk-cell buffer"></div><div class="chunk-cell buffer"></div><div class="chunk-cell buffer"></div><div class="chunk-cell buffer"></div><div class="chunk-cell buffer"></div><div class="chunk-cell buffer"></div><div class="chunk-cell buffer"></div><div class="chunk-cell buffer"></div>
+                    </div>
+                    <div class="legend">
+                        <div class="legend-item"><span class="swatch center"></span><span><strong>C</strong> — chunk gracza. Pozycja startowa to chunk <code>(0, 0)</code>.</span></div>
+                        <div class="legend-item"><span class="swatch built"></span><span><strong>7×7</strong> — budowane przez <code>buildAround(cx, cz)</code> dla promienia <code>CHUNK_RADIUS = 3</code>.</span></div>
+                        <div class="legend-item"><span class="swatch buffer"></span><span><strong>pierścień 9×9</strong> — stare chunki trzymane w buforze, dopóki <code>|dx| ≤ 4</code> i <code>|dz| ≤ 4</code>.</span></div>
+                        <p class="small muted">Liczby w komórkach pokazują odległość od chunka gracza w chunkach. Poza pierścieniem chunk jest usuwany razem z geometrią i teksturami.</p>
+                    </div>
+                </div>
+
+                <div class="table-wrap">
+                    <table>
+                        <thead><tr><th>Stała</th><th>Wartość</th><th>Znaczenie</th></tr></thead>
+                        <tbody>
+                            <tr><td><code>tileSize</code></td><td class="num">35</td><td>Szerokość kafla w jednostkach świata.</td></tr>
+                            <tr><td><code>CHUNK_SIZE</code></td><td class="num">16</td><td>16 kafli na osi, czyli 256 kafli w chunku.</td></tr>
+                            <tr><td><code>CHUNK_RADIUS</code></td><td class="num">3</td><td>7×7 chunków wokół gracza jest budowane.</td></tr>
+                            <tr><td>próg usuwania</td><td class="num">4</td><td><code>CHUNK_RADIUS + 1</code>; daje jeden pierścień bufora.</td></tr>
+                            <tr><td><code>ACCESS_MARGIN</code></td><td class="num">3</td><td>Odkryty kafel poszerza dostępny obszar o 3 kafle w każdą stronę.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <h3>Cykl życia chunka</h3>
+                <div class="flow">
+                    <div class="flow-step">
+                        <div class="flow-num">1</div>
+                        <div class="flow-body">
+                            <strong>Wykrycie zmiany chunka.</strong>
+                            <p><code>ChunkManager.update</code> przelicza chunk kamery. Jeśli <code>cx</code> lub <code>cz</code> różni się od poprzedniego, woła <code>buildAround</code>. To jedyne miejsce, które tworzy chunki.</p>
+                        </div>
+                    </div>
+                    <div class="flow-step">
+                        <div class="flow-num">2</div>
+                        <div class="flow-body">
+                            <strong>Budowa nowych chunków.</strong>
+                            <p>Dla brakujących pozycji powstaje <code>new Chunk(board, cx, cz)</code>. Konstruktor tworzy 256 kafli, terrain mesh, fog mesh, maskę, marker mesh, dekoracje i od razu woła <code>restoreState()</code>.</p>
+                        </div>
+                    </div>
+                    <div class="flow-step">
+                        <div class="flow-num">3</div>
+                        <div class="flow-body">
+                            <strong>Usunięcie starych.</strong>
+                            <p>Chunk jest usuwany, gdy <code>Math.abs(chunk.cx - cx) &gt; 4</code> lub to samo dla <code>cz</code>. <code>dispose()</code> usuwa grupę ze sceny, ukrywa flagi, zwalnia geometrię, maskę, materiał mgły i instancje.</p>
+                        </div>
+                    </div>
+                    <div class="flow-step">
+                        <div class="flow-num">4</div>
+                        <div class="flow-body">
+                            <strong>Aktualizacja istniejących.</strong>
+                            <p>Każda klatka woła <code>chunk.update(delta)</code>: postęp fade mgły, a jeśli <code>markerDirty</code>, przebudowę scalonego mesha markerów i instancji grzybów.</p>
+                        </div>
+                    </div>
+                    <div class="flow-step">
+                        <div class="flow-num">5</div>
+                        <div class="flow-body">
+                            <strong>Odświeżenie listy raycastu.</strong>
+                            <p><code>refreshMeshList()</code> zbiera <code>terrainMesh</code> wszystkich aktywnych chunków. Ta lista jest jedynym celem promienia gracza.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="callout ok">
+                    <strong>Lokalny układ współrzędnych.</strong> Każdy chunk ma grupę przesuniętą do
+                    <code>originX = cx * 16 * 35</code>. Geometria wewnątrz jest lokalna, więc precyzja
+                    <code>float</code> nie spada daleko od spawnu. Raycast dostaje punkty świata, ale
+                    <code>getTile</code> i tak przelicza je na współrzędne siatki.
+                </div>
+            </section>
+
+            <section id="wspolrzedne">
+                <div class="section-kicker"><span>10</span> Współrzędne i jednostki</div>
+                <h2>Kafel, chunk, świat</h2>
+                <p class="lead">
+                    Trzy układy współrzędnych spotykają się w jednym miejscu: kafel <code>(x, z)</code>,
+                    lokalny kafel w chunku i pozycja świata. Pomieszanie ich to najłatwiejszy sposób na
+                    błąd w tym projekcie, więc warto trzymać się wzorów.
+                </p>
+
+                <div class="grid grid-2">
+                    <div class="card">
+                        <span class="card-label">Kafel</span>
+                        <h3>Pozycja i środek</h3>
+                        <p>Kafel <code>(x, z)</code> zajmuje świat od <code>(x*35, z*35)</code> do <code>((x+1)*35, (z+1)*35)</code>.</p>
+                        <pre><code>worldX = (x + 0.5) * 35
+worldZ = (z + 0.5) * 35
+surfaceY = terrain.surfaceY(x, z)</code></pre>
+                    </div>
+                    <div class="card">
+                        <span class="card-label">Chunk</span>
+                        <h3>Pochodzenie grupy</h3>
+                        <p>Chunk <code>(cx, cz)</code> zaczyna się na kaflu <code>(cx*16, cz*16)</code>, a jego grupa stoi w świecie na:</p>
+                        <pre><code>originX = cx * 16 * 35
+originZ = cz * 16 * 35</code></pre>
+                        <p class="small muted">Cała geometria chunka jest liczona względem tego originu.</p>
+                    </div>
+                </div>
+
+                <div class="coord-strip" aria-label="Skala: kafel 35, chunk 16 kafli = 560 jednostek">
+                    <div class="coord-block"><strong>35</strong><span>jeden kafel</span></div>
+                    <div class="coord-block"><strong>16 × 35 = 560</strong><span>jeden chunk na osi</span></div>
+                    <div class="coord-block"><strong>7 × 560 = 3920</strong><span>aktywna siatka chunków na osi</span></div>
+                    <div class="coord-block"><strong>±131 072</strong><span>przybliżony zakres <code>packKey</code></span></div>
+                </div>
+
+                <h3>Kalkulator współrzędnych</h3>
+                <p class="small muted">Wpisz kafel, a zobaczysz jego środek, chunk, lokalny indeks i zapakowany klucz. Wartości są liczone dokładnie tak jak w kodzie, z <code>Math.floor</code> dla ujemnych współrzędnych.</p>
+                <div class="calculator">
+                    <div>
+                        <div class="calc-controls">
+                            <div class="calc-field">
+                                <label for="coord-x">kafel x</label>
+                                <input class="calc-input" id="coord-x" type="number" value="0" step="1" inputmode="numeric">
+                            </div>
+                            <div class="calc-field">
+                                <label for="coord-z">kafel z</label>
+                                <input class="calc-input" id="coord-z" type="number" value="0" step="1" inputmode="numeric">
+                            </div>
+                        </div>
+                        <p class="calc-error" id="coord-error" role="status"></p>
+                        <p class="small muted">Środek kafla to <code>(x + 0.5) * 35</code>. Ujemne kafle też działają: <code>Math.floor(-1 / 16) = -1</code>.</p>
+                    </div>
+                    <div class="calc-output" aria-live="polite">
+                        <div class="calc-row"><span>środek świata</span><strong id="out-center">17.5, 17.5</strong></div>
+                        <div class="calc-row"><span>chunk</span><strong id="out-chunk">0, 0</strong></div>
+                        <div class="calc-row"><span>lokalny kafel</span><strong id="out-local">0, 0</strong></div>
+                        <div class="calc-row"><span>origin chunka</span><strong id="out-origin">0, 0</strong></div>
+                        <div class="calc-row"><span>packKey</span><strong id="out-pack">0</strong></div>
+                        <div class="calc-row"><span>chunkKey</span><strong id="out-chunk-key">0</strong></div>
+                    </div>
+                </div>
+
+                <div class="table-wrap">
+                    <table>
+                        <thead><tr><th>Pojęcie</th><th>Wzór</th><th>Uwaga</th></tr></thead>
+                        <tbody>
+                            <tr><td>środek kafla</td><td><code>((x + 0.5) * 35, (z + 0.5) * 35)</code></td><td>Używany przez flagę, markery i dekoracje.</td></tr>
+                            <tr><td>chunk kafla</td><td><code>floor(x / 16)</code>, <code>floor(z / 16)</code></td><td>Działa też dla ujemnych.</td></tr>
+                            <tr><td>lokalny kafel</td><td><code>((x % 16) + 16) % 16</code></td><td>0…15 wewnątrz chunka.</td></tr>
+                            <tr><td><code>packKey</code></td><td><code>(x + 131072) * 262144 + (z + 131072)</code></td><td>Jeden <code>number</code> w <code>Set</code>.</td></tr>
+                            <tr><td><code>chunkKey</code></td><td><code>(cx + 32768) * 65536 + (cz + 32768)</code></td><td>Klucz w <code>Map&lt;number, Chunk&gt;</code>.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="callout">
+                    <strong>Wysokości siedzą na narożnikach.</strong> Kafel nie ma własnej wysokości w geometrii.
+                    Ma ją narożnik siatki <code>(x, z)</code>, więc sąsiednie kafle dzielą te same wartości.
+                    <code>surfaceY</code> to średnia czterech narożników; <code>heightAtWorld</code> odtwarza
+                    dokładną wysokość na trójkątach renderowanej powierzchni.
+                </div>
+            </section>
+            <section id="teren">
+                <div class="section-kicker"><span>11</span> Teren</div>
+                <h2>Jedna funkcja wysokości dla całego świata</h2>
+                <p class="lead">
+                    Terrain nie przechowuje mapy wysokości. Ma czystą funkcję <code>heightAt(gx, gz)</code>,
+                    która dla dowolnego narożnika siatki zwraca wysokość. Chunki i horyzont tylko próbkują
+                    tę funkcję i składają z niej geometrię.
+                </p>
+
+                <div class="flow">
+                    <div class="flow-step">
+                        <div class="flow-num">1</div>
+                        <div class="flow-body">
+                            <strong>Seed i generator.</strong>
+                            <p><code>mulberry32(seed)</code> zasila <code>createNoise2D</code> z <code>simplex-noise</code>. Po restarcie <code>Terrain.reseed(newSeed)</code> tworzy nowy generator i czyści cache.</p>
+                        </div>
+                    </div>
+                    <div class="flow-step">
+                        <div class="flow-num">2</div>
+                        <div class="flow-body">
+                            <strong>Dwie warstwy szumu.</strong>
+                            <p><code>fbm</code> sumuje 4 oktawy miękkich wzgórz. <code>ridged</code> sumuje 5 oktaw ostrego szumu górskiego. Obie funkcje normalizują amplitudę.</p>
+                        </div>
+                    </div>
+                    <div class="flow-step">
+                        <div class="flow-num">3</div>
+                        <div class="flow-body">
+                            <strong>Wysokość.</strong>
+                            <p><code>base = fbm * 0.5 + 0.5</code>, potem <code>t = clamp(base * 0.5 + ridge - 0.3, 0, 1)</code>, <code>t = t^1.3</code>, a na końcu <code>h = 8 + t * 202</code>.</p>
+                        </div>
+                    </div>
+                    <div class="flow-step">
+                        <div class="flow-num">4</div>
+                        <div class="flow-body">
+                            <strong>Kolor.</strong>
+                            <p><code>colorFor(avgHeight, slope)</code> miesza trawę niską i wysoką, skałę na stromych i wysokich fragmentach oraz śnieg na szczytach. Kolor jest zapisany per wierzchołek.</p>
+                        </div>
+                    </div>
+                    <div class="flow-step">
+                        <div class="flow-num">5</div>
+                        <div class="flow-body">
+                            <strong>Geometria.</strong>
+                            <p><code>buildTerrainSurface</code> tworzy siatkę quadów, dzieli każdy na dwa trójkąty i liczy UV w globalnych jednostkach kafli, żeby tekstura szła płynnie przez granice chunków.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <pre><code>const nx = gx * 0.03
+const nz = gz * 0.03
+const base = this.fbm(nx, nz) * 0.5 + 0.5
+const ridge = this.ridged(nx, nz)
+let t = base * 0.5 + (ridge - 0.3)
+t = Math.max(0, Math.min(1, t))
+t = Math.pow(t, 1.3)
+const h = 8 + t * (210 - 8)</code></pre>
+
+                <div class="grid grid-2">
+                    <div class="card">
+                        <span class="card-label">Cache</span>
+                        <h3>Dlaczego wysokości są memoizowane</h3>
+                        <p>
+                            Ta sama funkcja jest wołana przez teren chunka, horyzont, markery, dekoracje i flagi.
+                            Cache pod kluczem <code>(gx + 131072) * 262144 + (gz + 131072)</code> zwraca gotową
+                            wysokość. Po 400 000 wpisów cache jest czyszczony w całości.
+                        </p>
+                    </div>
+                    <div class="card">
+                        <span class="card-label">Dokładność</span>
+                        <h3><code>heightAtWorld</code> musi zgadzać się z trójkątami</h3>
+                        <p>
+                            Kafel dzieli się po przekątnej <code>a–d</code>. Dla <code>v &lt;= u</code>
+                            interpolacja idzie przez <code>ha, hb, hd</code>, w przeciwnym razie przez
+                            <code>ha, hc, hd</code>. Dzięki temu marker i grzyb stoją dokładnie na renderowanej
+                            powierzchni, a nie na średniej wysokości.
+                        </p>
+                    </div>
+                </div>
+
+                <div class="callout warn">
+                    <strong>Wspólny materiał, osobna geometria.</strong> Wszystkie chunki używają jednego
+                    <code>MeshStandardMaterial</code> z <code>vertexColors</code> i wspólnej tekstury detalu.
+                    Geometria jest natomiast tworzona per chunk. <code>Horizon</code> używa tej samej funkcji
+                    <code>buildTerrainSurface</code>, ale z krokiem <code>tileSize * 8</code> i 34 komórkami.
+                </div>
+
+                <p class="small muted">
+                    Po restarcie <code>Board.restart()</code> losuje nowy seed, woła <code>terrain.reseed(seed)</code>
+                    i <code>decoration.setSeed(seed)</code>. Horyzont dostaje <code>reseed()</code>, który wymusza
+                    przebudowę. To dlatego restart daje zupełnie nowy świat, a nie ten sam teren z wyczyszczoną planszą.
+                </p>
+            </section>
+
+            <section id="bomby">
+                <div class="section-kicker"><span>12</span> Bomby</div>
+                <h2>Bomba to hash, nie obiekt</h2>
+                <p class="lead">
+                    Plansza nie ma listy bomb. <code>Board.isBomb(gx, gz)</code> za każdym razem liczy hash
+                    współrzędnych i seeda. Ten sam kafel jest bombą niezależnie od tego, czy chunk jest
+                    załadowany, usunięty i zbudowany ponownie.
+                </p>
+
+                <div class="flow">
+                    <div class="flow-step">
+                        <div class="flow-num">1</div>
+                        <div class="flow-body">
+                            <strong>Gra jeszcze się nie zaczęła?</strong>
+                            <p><code>if (!this.started) return false</code>. Przed pierwszym kliknięciem cała plansza jest bezpieczna. To gwarantuje, że gracz nie zginie na starcie.</p>
+                        </div>
+                    </div>
+                    <div class="flow-step">
+                        <div class="flow-num">2</div>
+                        <div class="flow-body">
+                            <strong>Strefa bezpieczna?</strong>
+                            <p><code>if (safeZone.has(packKey(gx, gz))) return false</code>. Pierwszy otwarty kafel dodaje 3×3 wokół siebie. Ta strefa jest stała do końca sesji.</p>
+                        </div>
+                    </div>
+                    <div class="flow-step">
+                        <div class="flow-num">3</div>
+                        <div class="flow-body">
+                            <strong>Hash.</strong>
+                            <p><code>hash2(gx, gz, seed) &lt; 0.13</code>. Hash jest deterministyczny i niezależny od kolejności odkrywania. Gęstość 13% oznacza średnio 33 bomby na chunk 16×16.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <pre><code>public isBomb(gx: number, gz: number): boolean {
+    if (!this.started) return false
+    if (this.safeZone.has(packKey(gx, gz))) return false
+    return hash2(gx, gz, this.seed) &lt; this.bombsDensity
+}
+
+public ensureStarted(x: number, z: number): void {
+    if (this.started) return
+    this.started = true
+    for (let dx = -1; dx &lt;= 1; dx++)
+        for (let dz = -1; dz &lt;= 1; dz++)
+            this.safeZone.add(packKey(x + dx, z + dz))
+}</code></pre>
+
+                <div class="grid grid-2">
+                    <div class="card card-violet">
+                        <span class="card-label">Wartość kafla</span>
+                        <h3><code>Tile.computeValue()</code></h3>
+                        <p>
+                            Najpierw sprawdza, czy sam kafel jest bombą. Jeśli nie, liczy bomby w ośmiu
+                            sąsiadach (3×3 bez środka). Wynik to <code>'bomb'</code>, liczba 1–8 albo
+                            <code>'empty'</code>. Wartość jest cache'owana w <code>computed</code>.
+                        </p>
+                    </div>
+                    <div class="card card-red">
+                        <span class="card-label">Koniec gry</span>
+                        <h3>Bomby pojawiają się dopiero po przegranej</h3>
+                        <p>
+                            <code>Board.revealAllBombs()</code> ustawia <code>bombsRevealed = true</code> i
+                            przechodzi po wszystkich załadowanych chunkach. Dla każdego nieotwartego kafla
+                            liczy wartość i natychmiast odkrywa bomby. Chunki doładowane później robią to samo
+                            w <code>restoreState()</code>.
+                        </p>
+                    </div>
+                </div>
+
+                <div class="callout danger">
+                    <strong>Brak warunku zwycięstwa.</strong> Plansza jest nieskończona, więc nie ma stanu
+                    „wszystkie bezpieczne kafle odkryte”. Gra kończy się tylko na bombie albo restarcie.
+                    <code>#minesCount</code> w HUD to liczba odkrytych kafli, mimo mylącej nazwy.
+                </div>
+
+                <p class="small muted">
+                    Gęstość bomb i zakres współrzędnych są celowo stałe. Zmiana <code>bombsDensity</code>
+                    zmienia trudność, ale nie wymaga zapisu listy bomb. Zmiana zakresu <code>packKey</code>
+                    wymaga świadomej decyzji, bo dotyka wszystkich zbiorów współrzędnych.
+                </p>
+            </section>
+
+            <section id="render-chunka">
+                <div class="section-kicker"><span>13</span> Render chunka</div>
+                <h2>Co wisi na scenie i ile to kosztuje</h2>
+                <p class="lead">
+                    Chunk jest właścicielem grupy, która stoi w originie świata. Wszystkie dzieci są lokalne.
+                    Większość z nich to meshe scalone lub instancjonowane, nie osobne obiekty na kafel.
+                </p>
+
+                <div class="render-tree" aria-label="Drzewo obiektów chunka">
+<pre>Group <span class="note">(chunk origin = cx·560, cz·560)</span>
+├─ terrainMesh — scalona geometria 16×16, wspólny materiał terenu
+├─ fogMesh — ta sama geometria, własny materiał mgły, y += 0.4
+├─ markerMesh — jeden scalony mesh na chunk, wspólny materiał markerów
+├─ decoMeshes[] — InstancedMesh per część modelu, per szablon
+└─ bombMeshes[] — InstancedMesh per część grzyba, tylko po ujawnieniu bomb
+
+<span class="note">Poza grupą chunka:</span>
+├─ flag.mesh — dodawany bezpośrednio do sceny, nie do grupy chunka
+└─ Horizon — mesh istnieje, ale scene.add jest zakomentowane</pre>
+                </div>
+
+                <div class="table-wrap">
+                    <table>
+                        <thead><tr><th>Obiekt</th><th>Batching</th><th>Właściciel zasobu</th><th>Raycast</th></tr></thead>
+                        <tbody>
+                            <tr><td>Teren</td><td>Jeden mesh na chunk, 16×16 quadów.</td><td>Geometria per chunk, materiał współdzielony.</td><td>Tak, tylko ten mesh jest w <code>meshList</code>.</td></tr>
+                            <tr><td>Mgła</td><td>Jeden mesh na chunk, ta sama geometria co teren.</td><td>Materiał i maska per chunk.</td><td>Nie.</td></tr>
+                            <tr><td>Markery</td><td>Jeden scalony mesh na chunk.</td><td>Geometria per chunk, materiał współdzielony.</td><td>Nie, <code>raycast</code> wyłączony.</td></tr>
+                            <tr><td>Dekoracje</td><td><code>InstancedMesh</code> per część modelu i szablon.</td><td>Geometria i materiał z GLB współdzielone; macierze per chunk.</td><td>Nie.</td></tr>
+                            <tr><td>Grzyby bomb</td><td><code>InstancedMesh</code> per część modelu.</td><td>Geometria i materiał z GLB współdzielone; macierze per chunk.</td><td>Nie.</td></tr>
+                            <tr><td>Flagi</td><td>Osobny klon na widoczną flagę.</td><td>Klon OBJ/MTL lub fallback; żyje na scenie.</td><td>Nie.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="grid grid-2">
+                    <div class="card">
+                        <span class="card-label">Dlaczego tak</span>
+                        <h3>Brak mesha per kafel</h3>
+                        <p>
+                            256 kafli w chunku razy 49 chunków dałoby tysiące obiektów i draw calls. Zamiast
+                            tego teren, mgła i markery są scalane w kilka meshy, a dekoracje i grzyby używają
+                            instancingu. Kafel jest tylko danymi.
+                        </p>
+                    </div>
+                    <div class="card">
+                        <span class="card-label">Koszt</span>
+                        <h3>Flagi są wyjątkiem</h3>
+                        <p>
+                            Każda widoczna flaga to osobny klon modelu dodany do sceny. To akceptowalne, bo
+                            gracz stawia ich ograniczoną liczbę, a model jest mały. <code>dispose()</code>
+                            chunka ukrywa flagi, żeby nie zostały po usunięciu terenu.
+                        </p>
+                    </div>
+                </div>
+
+                <div class="callout">
+                    <strong>Materiały współdzielone, instancje osobne.</strong> <code>InstancedProp</code>
+                    rozkłada model GLB na części względem roota. Każdy chunk tworzy własne
+                    <code>InstancedMesh</code> dla tych samych geometrii i materiałów. Widoczność pojedynczego
+                    propsa to zapis macierzy ze skalą 0, nie usuwanie obiektu ze sceny.
+                </div>
+            </section>
+            <section id="mgla">
+                <div class="section-kicker"><span>14</span> Mgła</div>
+                <h2>Jedna maska na chunk, zero meshy per kafel</h2>
+                <p class="lead">
+                    Ukrywanie kafli nie polega na chowaniu obiektów. Każdy chunk ma jedną teksturę maski
+                    16×16 i jeden mesh chmur. Shader próbkuje maskę i mnoży przez nią alpha mgły.
+                    Odkrycie kafla to zmiana jednego bajtu i uruchomienie fade.
+                </p>
+
+                <div class="grid grid-2">
+                    <div class="card">
+                        <span class="card-label">Maska</span>
+                        <h3><code>DataTexture</code> 16×16</h3>
+                        <ul>
+                            <li><code>RedFormat</code>, <code>UnsignedByteType</code>, filtr nearest.</li>
+                            <li><code>255</code> = kafel ukryty, mgła w pełni widoczna.</li>
+                            <li><code>0</code> = kafel odkryty, mgła przezroczysta.</li>
+                            <li>Indeks: <code>lz * 16 + lx</code>, czyli wiersz Z, kolumna X.</li>
+                            <li>Odkrycie natychmiastowe ustawia 0 i usuwa wpis z animacji.</li>
+                        </ul>
+                    </div>
+                    <div class="card">
+                        <span class="card-label">Fade</span>
+                        <h3>0,35 sekundy na kafel</h3>
+                        <p>
+                            <code>Chunk.update(delta)</code> zmniejsza wartość o
+                            <code>delta / 0.35 * 255</code>. Po osiągnięciu zera wpis jest usuwany, a
+                            <code>flushPendingMarker(idx)</code> przenosi oczekujący marker do scalonej geometrii.
+                        </p>
+                        <p class="small muted">Fade działa niezależnie od liczby odkrywanych kafli; wszystkie animacje są w jednej mapie <code>anim</code>.</p>
+                    </div>
+                </div>
+
+                <h3>Shader mgły</h3>
+                <p>
+                    Materiał mgły to <code>MeshStandardMaterial</code> z teksturą chmur, przezroczystością i
+                    wyłączonym zapisem głębi. W <code>onBeforeCompile</code> dochodzi varying z lokalną
+                    pozycją XZ i próbka maski:
+                </p>
+                <pre><code>// vertex
+vMaskLocal = transformed.xz;
+
+// fragment
+float maskVal = texture2D(uMask, vMaskLocal / uMaskSize).r;
+diffuseColor.a *= maskVal;</code></pre>
+
+                <div class="callout warn">
+                    <strong>Z-fighting.</strong> Mgła leży na tej samej geometrii co teren. Chronią ją trzy
+                    rzeczy: <code>position.y = 0.4</code>, <code>polygonOffset = true</code> z
+                    <code>factor = -1</code> i <code>units = -1</code>, oraz <code>depthWrite = false</code>.
+                    Zmiana któregokolwiek z tych elementów może przywrócić migotanie na dużych odległościach.
+                </div>
+
+                <h3>Kolejka markerów</h3>
+                <p>
+                    Marker nie może pojawić się pod mgłą. <code>Chunk.markMarker(tile)</code> sprawdza, czy
+                    maska kafla jest już zerem. Jeśli nie, odkłada kafel w <code>pendingMarkers</code>.
+                    Dopiero po zakończeniu fade wpis trafia do <code>markerEntries</code>, a
+                    <code>markerDirty</code> powoduje przebudowę mesha w następnej aktualizacji chunka.
+                </p>
+
+                <div class="table-wrap compact">
+                    <table>
+                        <thead><tr><th>Sytuacja</th><th>Maska</th><th>Efekt</th></tr></thead>
+                        <tbody>
+                            <tr><td>Nowy chunk</td><td>wszystkie 255</td><td>Cały teren zasłonięty chmurami.</td></tr>
+                            <tr><td>Odkrycie z animacją</td><td>255 → 0 w 0,35 s</td><td>Marker czeka w <code>pendingMarkers</code>.</td></tr>
+                            <tr><td>Odkrycie natychmiastowe</td><td>0 od razu</td><td>Restore chunka lub ujawnienie bomb; marker od razu.</td></tr>
+                            <tr><td>Restart</td><td>chunki usunięte</td><td>Nowe chunki startują z pełną mgłą.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section id="markery">
+                <div class="section-kicker"><span>15</span> Markery i dekoracje</div>
+                <h2>Liczba bomb jako roślina, nie ikona</h2>
+                <p class="lead">
+                    Odkryty bezpieczny kafel z liczbą dostaje proceduralny bloom plant: tyle kwiatów, ile
+                    sąsiednich bomb, w kanonicznym kolorze sapera. Bombowy kafel dostaje czerwony grzyb i
+                    spore litter, ale dopiero po przegranej.
+                </p>
+
+                <div class="grid grid-2">
+                    <div class="card card-green">
+                        <span class="card-label">Marker liczby</span>
+                        <h3>Bloom plant</h3>
+                        <ul>
+                            <li>Liczba kwiatów: <code>min(8, round(value))</code>.</li>
+                            <li>Jedna liczba = jeden kwiat w środku; 2–8 = równy pierścień.</li>
+                            <li>Paleta: 1 niebieski, 2 zielony, 3 czerwony, 4 granatowy, 5 bordowy, 6 morski, 7 czarny, 8 szary.</li>
+                            <li>Kremowy środek i ciemna obwódka poprawiają czytelność na śniegu i trawie.</li>
+                            <li>Petal litter wokół podstawy jest kolorem, nie drugim licznikiem.</li>
+                            <li>Pusty kafel nie ma markera.</li>
+                        </ul>
+                    </div>
+                    <div class="card card-red">
+                        <span class="card-label">Marker bomby</span>
+                        <h3>Grzyb i spore litter</h3>
+                        <ul>
+                            <li>Model <code>mushroom_bomb.glb</code> skalowany do <code>HEIGHT = 26</code>.</li>
+                            <li>Głowa przyciemniona w stronę czerwieni, korpus zachowuje jasny kolor.</li>
+                            <li><code>footOffset</code> wyrównuje pivot modelu do terenu.</li>
+                            <li>Spore litter to czerwone płatki wokół podstawy.</li>
+                            <li>Bomba pokazuje się tylko przez <code>revealAllBombs</code> po przegranej.</li>
+                            <li>Brak fallbacku: jeśli GLB się nie załaduje, bombowy kafel zostaje bez grzyba.</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <h3>Jak marker trafia na chunk</h3>
+                <div class="flow">
+                    <div class="flow-step">
+                        <div class="flow-num">1</div>
+                        <div class="flow-body">
+                            <strong><code>Tile.reveal()</code> sprawdza <code>hasMarker()</code>.</strong>
+                            <p>Marker istnieje dla bomby i dla liczby ≥ 1. Pusty kafel nie tworzy markera; zamiast tego przywraca widoczność dekoracji.</p>
+                        </div>
+                    </div>
+                    <div class="flow-step">
+                        <div class="flow-num">2</div>
+                        <div class="flow-body">
+                            <strong><code>Chunk.markMarker(tile)</code> czeka na koniec fade.</strong>
+                            <p>Jeśli mgła jeszcze nie zniknęła, kafel idzie do <code>pendingMarkers</code>. Po fade wpis trafia do <code>markerEntries</code> i ustawia <code>markerDirty</code>.</p>
+                        </div>
+                    </div>
+                    <div class="flow-step">
+                        <div class="flow-num">3</div>
+                        <div class="flow-body">
+                            <strong><code>rebuildMarkers()</code> scala wszystko.</strong>
+                            <p><code>buildMarkerGeometry</code> dostaje wpisy, sampler wysokości i origin chunka. Zwraca jedną geometrię z kolorami wierzchołków. Grzyby bombowe są przekazywane osobno do <code>BombMushroom.populate</code>.</p>
+                        </div>
+                    </div>
+                    <div class="flow-step">
+                        <div class="flow-num">4</div>
+                        <div class="flow-body">
+                            <strong>Dekoracje ustępują markerowi.</strong>
+                            <p><code>setDecoVisible(tile, false)</code> chowa trawę, kamienie i krzaki pod markerem. Przy odkryciu pustego kafla dekoracje wracają. <code>restoreState</code> musi odtworzyć tę samą logikę.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <h3>Dekoracje świata</h3>
+                <p>
+                    <code>Decoration</code> ładuje 11 modeli natury i rozrzuca je po kaflach. Dla każdego kafla
+                    losuje 1–2 propsy, rodzaj i skalę. Drzewa rosną tylko powyżej <code>surfaceY &gt; 90</code>;
+                    reszta to kamienie, krzaki i trawa. Pozycje są lokalne względem chunka, a wysokość pochodzi
+                    z <code>heightAtWorld</code>.
+                </p>
+                <div class="pill-row">
+                    <span class="pill green">4 modele drzew</span>
+                    <span class="pill amber">3 modele skał</span>
+                    <span class="pill violet">3 modele krzaków</span>
+                    <span class="pill accent">1 model trawy</span>
+                </div>
+                <p class="small muted">
+                    Modele są ładowane asynchronicznie. Do czasu zakończenia ładowania chunki nie mają
+                    dekoracji; potem <code>onReady → chunkManager.rebuildDecorations()</code> przebudowuje
+                    wszystkie aktywne chunki. Plik <code>flower_redA.glb</code> istnieje w assetach, ale nie
+                    jest importowany — czerwone kwiaty zostały celowo usunięte z losowego scatteru, żeby nie
+                    myliły się z markerami.
+                </p>
+            </section>
+
+            <section id="assety">
+                <div class="section-kicker"><span>16</span> Assety</div>
+                <h2>Co ładuje się z plików, a co powstaje w kodzie</h2>
+                <p class="lead">
+                    Większość świata jest proceduralna. Z plików pochodzą tylko modele natury, grzyb bomby
+                    i flaga. Chmury oraz tekstura detalu terenu są rysowane na canvasie przy starcie, więc
+                    gra nie potrzebuje dodatkowych tekstur.
+                </p>
+
+                <div class="table-wrap">
+                    <table>
+                        <thead><tr><th>Asset</th><th>Loader</th><th>Konsument</th><th>Zachowanie przy błędzie</th></tr></thead>
+                        <tbody>
+                            <tr><td><code>flag.obj</code>, <code>flag.mtl</code></td><td><code>OBJLoader</code> + <code>MTLLoader</code></td><td><code>Flag.preload</code> → klon per kafel</td><td>Prymitywny fallback: cylinder + stożek.</td></tr>
+                            <tr><td>11 plików <code>nature/*.glb</code></td><td><code>GLTFLoader</code> + <code>LoadingManager</code></td><td><code>Decoration</code></td><td>Model jest pomijany; licznik ładowania i tak maleje.</td></tr>
+                            <tr><td><code>mushroom_bomb.glb</code></td><td><code>GLTFLoader</code></td><td><code>BombMushroom</code></td><td>Brak fallbacku; bombowe kafle zostają bez grzyba.</td></tr>
+                            <tr><td>chmury</td><td>canvas 2D → <code>CanvasTexture</code></td><td><code>Fog.getCloudTexture()</code></td><td>Nie dotyczy; generowane lokalnie.</td></tr>
+                            <tr><td>detale terenu</td><td>canvas 2D → <code>CanvasTexture</code></td><td><code>Terrain</code></td><td>Nie dotyczy; generowane lokalnie.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="grid grid-3">
+                    <div class="card">
+                        <span class="card-label">Flaga</span>
+                        <h3>Preload i klon</h3>
+                        <p class="small muted"><code>Flag.preload</code> ładuje MTL, potem OBJ, i zapisuje wynik w <code>board.preloadedFlag</code>. Każda flaga klonuje model i ustawia materiały na <code>DoubleSide</code>.</p>
+                    </div>
+                    <div class="card">
+                        <span class="card-label">Natura</span>
+                        <h3>Instancing po załadowaniu</h3>
+                        <p class="small muted"><code>prepareNatureModel</code> zeruje metalness i ustawia roughness, bo kit natury domyślnie wygląda metalicznie bez environment mapy.</p>
+                    </div>
+                    <div class="card">
+                        <span class="card-label">Grzyb</span>
+                        <h3>Pomiar i skala</h3>
+                        <p class="small muted"><code>Box3</code> mierzy model, skaluje do 26 jednostek i liczy <code>footOffset</code>, żeby podstawa stała na terenie niezależnie od pivotu.</p>
+                    </div>
+                </div>
+
+                <div class="callout">
+                    <strong>Vite i importy assetów.</strong> Pliki <code>.glb</code>, <code>.obj</code> i
+                    <code>.mtl</code> są importowane jako URL. Deklaracje typów są w
+                    <code>src/vite-env.d.ts</code>, a <code>assetsInclude</code> w <code>vite.config.ts</code>.
+                    Nowy typ assetu wymaga zmiany w obu miejscach.
+                </div>
+
+                <details class="code-block">
+                    <summary>Jak działa <code>DecoInstance</code></summary>
+<pre><code>// Jedna instancja = ten sam indeks we wszystkich mesha danego szablonu.
+dummy.position.copy(position)
+dummy.rotation.set(0, rotationY, 0)
+dummy.scale.setScalar(visible ? scale : 0)
+dummy.updateMatrix()
+
+for (let i = 0; i < meshes.length; i++) {
+    finalMatrix.multiplyMatrices(dummy.matrix, parts[i])
+    meshes[i].setMatrixAt(index, finalMatrix)
+    meshes[i].instanceMatrix.needsUpdate = true
+}</code></pre>
+                </details>
+            </section>
+            <section id="wydajnosc">
+                <div class="section-kicker"><span>17</span> Wydajność</div>
+                <h2>Dlaczego to działa w nieskończoność</h2>
+                <p class="lead">
+                    Wydajność nie wynika z jednej optymalizacji, tylko z czterech decyzji: świat jest
+                    generowany, nie przechowywany; chunki są strumieniowane; geometria jest scalana lub
+                    instancjonowana; raycast widzi tylko kilka meshy.
+                </p>
+
+                <div class="table-wrap">
+                    <table>
+                        <thead><tr><th>Mechanizm</th><th>Co oszczędza</th><th>Gdzie</th></tr></thead>
+                        <tbody>
+                            <tr><td>Zbiory współrzędnych zamiast siatki</td><td>Pamięć rośnie z liczbą odwiedzonych kafli, nie z obszarem świata.</td><td><code>Board</code></td></tr>
+                            <tr><td>Deterministyczny hash</td><td>Brak listy bomb i brak zapisu planszy.</td><td><code>Board.isBomb</code>, <code>hash2</code></td></tr>
+                            <tr><td>Chunk streaming</td><td>Stała liczba meshy i tekstur w GPU.</td><td><code>ChunkManager</code></td></tr>
+                            <tr><td>Scalone meshe</td><td>Jeden draw call na teren, mgłę i markery w chunku.</td><td><code>Chunk</code>, <code>TerrainSurface</code>, <code>Marker</code></td></tr>
+                            <tr><td>Instancing</td><td>Dekoracje i grzyby dzielą geometrię i materiał; ruch to tylko macierze.</td><td><code>Decoration</code>, <code>InstancedProp</code>, <code>BombMushroom</code></td></tr>
+                            <tr><td>Wspólne materiały i tekstury</td><td>Brak duplikatów stanu GPU dla terenu, markerów i chmur.</td><td><code>Terrain</code>, <code>Marker</code>, <code>Fog</code></td></tr>
+                            <tr><td>Raycast po <code>meshList</code></td><td>Promień sprawdza kilkadziesiąt terrain meshy, nie tysiące kafli.</td><td><code>Player</code></td></tr>
+                            <tr><td>Cache wysokości</td><td>Powtarzalne próbki terenu nie liczą noise od nowa.</td><td><code>Terrain</code></td></tr>
+                            <tr><td>Przebudowa tylko po zmianie chunka</td><td><code>buildAround</code> nie wykonuje się co klatkę.</td><td><code>ChunkManager.update</code></td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="grid grid-2">
+                    <div class="card card-green">
+                        <span class="card-label">Co jest ograniczone</span>
+                        <h3>Stały budżet</h3>
+                        <ul>
+                            <li>49 chunków budowanych w promieniu 3 (z buforem do 81).</li>
+                            <li>Geometry terenu budowane raz na chunk.</li>
+                            <li>Fade mgły aktualizuje tylko wpisy w <code>anim</code>.</li>
+                            <li>Marker rebuild tylko gdy <code>markerDirty</code>.</li>
+                            <li>Cache terenu ma twardy limit 400 000 wpisów.</li>
+                        </ul>
+                    </div>
+                    <div class="card card-amber">
+                        <span class="card-label">Co może kosztować</span>
+                        <h3>Realne wąskie gardła</h3>
+                        <ul>
+                            <li>Pierwsze wejście w nowy obszar: budowa 7×7 chunków i geometrii.</li>
+                            <li>Flood fill na dużym pustym obszarze: wiele <code>reveal</code> i markerów.</li>
+                            <li>Bardzo wiele widocznych flag: osobny mesh na każdą.</li>
+                            <li>Pierwsze załadowanie GLB: przebudowa dekoracji wszystkich chunków.</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="callout warn">
+                    <strong>Brak testów i lintera.</strong> Repozytorium nie ma runnera testów ani konfiguracji
+                    formatera. Weryfikacja to <code>npx tsc --noEmit</code>, <code>npm run build</code> i ręczne
+                    sprawdzenie w przeglądarce. Nie należy dopisywać komendy testowej, której nie ma.
+                </div>
+            </section>
+
+            <section id="pulapki">
+                <div class="section-kicker"><span>18</span> Pułapki i rozjazdy</div>
+                <h2>Miejsca, w których łatwo się pomylić</h2>
+                <p class="lead">
+                    Poniższa lista to nie lista błędów do naprawienia. To zachowania, które wynikają z kodu
+                    i które trzeba znać, zanim zmieni się dany fragment.
+                </p>
+
+                <div class="grid grid-2">
+                    <div class="card card-red">
+                        <span class="card-label">Dokumentacja vs kod</span>
+                        <h3><code>AGENTS.md</code> jest częściowo nieaktualny</h3>
+                        <ul>
+                            <li>Mówi, że <code>Game</code> trzyma punkty i timer; robi to <code>Session</code>.</li>
+                            <li>Nie opisuje <code>Session.ts</code> ani <code>TerrainSurface.ts</code>.</li>
+                            <li>Opisuje <code>Horizon</code>, ale nie mówi wprost, że jest niewidoczny; dopiero sekcja gotchas to dodaje.</li>
+                        </ul>
+                    </div>
+                    <div class="card card-amber">
+                        <span class="card-label">Horizon</span>
+                        <h3>Mesh istnieje, ale nie jest na scenie</h3>
+                        <p>
+                            <code>new Horizon(board)</code> i <code>horizon.update()</code> działają, ale
+                            <code>this.scene.add(this.horizon)</code> jest zakomentowane w
+                            <code>Game.createWorld()</code>. Obecnie horyzont nie jest widoczny.
+                        </p>
+                    </div>
+                    <div class="card">
+                        <span class="card-label">Chunki</span>
+                        <h3>Bufor o jeden pierścień</h3>
+                        <p>
+                            <code>CHUNK_RADIUS = 3</code> oznacza budowę 7×7, ale usuwanie następuje przy
+                            <code>&gt; CHUNK_RADIUS + 1</code>, czyli dopiero powyżej 4. Między budową a
+                            usunięciem istnieje pierścień starych chunków.
+                        </p>
+                    </div>
+                    <div class="card">
+                        <span class="card-label">Flagi</span>
+                        <h3>Poza grupą chunka</h3>
+                        <p>
+                            <code>Flag.mesh</code> jest dodawany bezpośrednio do sceny, nie do
+                            <code>chunk.group</code>. <code>Chunk.dispose()</code> musi więc jawnie ukryć flagi,
+                            żeby nie zostały po usunięciu terenu.
+                        </p>
+                    </div>
+                    <div class="card">
+                        <span class="card-label">Grzyb</span>
+                        <h3>Brak fallbacku</h3>
+                        <p>
+                            <code>BombMushroom</code> nie ma prymitywnego zamiennika. Błąd ładowania GLB
+                            oznacza brak jakiegokolwiek markera bomby. To świadoma decyzja: lepiej brak
+                            markera niż mieszanie dwóch stylów.
+                        </p>
+                    </div>
+                    <div class="card">
+                        <span class="card-label">Mgła</span>
+                        <h3>Trzy zabezpieczenia z-fightingu</h3>
+                        <p>
+                            <code>y += 0.4</code>, <code>polygonOffset</code> i <code>depthWrite = false</code>.
+                            Usunięcie jednego z nich może przywrócić migotanie mgły z terenem, szczególnie
+                            daleko od kamery.
+                        </p>
+                    </div>
+                    <div class="card">
+                        <span class="card-label">Raycast</span>
+                        <h3>Limit 12 000</h3>
+                        <p>
+                            Kamera może wznieść się do 4000 przez <kbd>E</kbd>. Limit dystansu promienia jest
+                            większy, żeby nie ucinać trafień z dużej wysokości. Nie zmniejszaj go bez zmiany
+                            zakresu wysokości.
+                        </p>
+                    </div>
+                    <div class="card">
+                        <span class="card-label">Restore</span>
+                        <h3>Bez punktowania</h3>
+                        <p>
+                            <code>Chunk.restoreState()</code> używa <code>Tile.restoreOpen()</code>, nie
+                            <code>reveal()</code>. Odtworzenie chunka nie może dodać punktów ani uruchomić
+                            flood fill. Zachowanie markerów i dekoracji musi być takie samo jak przy reveal.
+                        </p>
+                    </div>
+                    <div class="card">
+                        <span class="card-label">Markery</span>
+                        <h3>Kolejka, nie natychmiast</h3>
+                        <p>
+                            Marker czeka, aż maska mgły spadnie do zera. Dodanie go od razu pokazałoby
+                            roślinę pod chmurami. <code>pendingMarkers</code> jest częścią stanu chunka.
+                        </p>
+                    </div>
+                    <div class="card">
+                        <span class="card-label">Assety</span>
+                        <h3>Nie każdy plik jest używany</h3>
+                        <p>
+                            <code>flower_redA.glb</code> leży w <code>src/assets/nature</code>, ale nie ma go
+                            w <code>SOURCES</code>. Czerwone kwiaty zostały usunięte z dekoracji, żeby nie
+                            wyglądały jak marker.
+                        </p>
+                    </div>
+                    <div class="card">
+                        <span class="card-label">HUD</span>
+                        <h3><code>minesCount</code> to nie miny</h3>
+                        <p>
+                            Mimo nazwy element pokazuje <code>Board.opened.size</code>, czyli liczbę odkrytych
+                            kafli. Licznik flag <code>flagsPlaced</code> jest w stanie sesji, ale nie ma
+                            własnego pola w HUD.
+                        </p>
+                    </div>
+                    <div class="card">
+                        <span class="card-label">Sterowanie</span>
+                        <h3>Pierwszy klik tylko blokuje</h3>
+                        <p>
+                            Po wejściu w grę pierwsze kliknięcie wywołuje wyłącznie <code>controls.lock()</code>.
+                            Dopiero kolejne kliknięcia otwierają lub flagują kafel. To zapobiega przypadkowemu
+                            ruchowi przy fokusowaniu okna.
+                        </p>
+                    </div>
+                </div>
+
+                <div class="callout danger">
+                    <strong>Zakres <code>packKey</code> jest umową.</strong> Współrzędne poza mniej więcej
+                    ±131 072 mogą kolidować w jednym <code>number</code>. To nie jest limit renderu ani
+                    rozmiaru świata w kodzie, ale limit kluczy w zbiorach. Zmiana zakresu wymaga analizy
+                    wszystkich miejsc, które pakują współrzędne.
+                </div>
+            </section>
+
+            <section id="czytanie-kodu">
+                <div class="section-kicker"><span>19</span> Ścieżka czytania</div>
+                <h2>W jakiej kolejności czytać repo</h2>
+                <p class="lead">
+                    Kod najlepiej czytać od wejścia do reguł, potem do świata, a na końcu do renderu.
+                    Poniższa kolejność odpowiada przepływowi jednej decyzji gracza.
+                </p>
+
+                <div class="flow">
+                    <div class="flow-step">
+                        <div class="flow-num">1</div>
+                        <div class="flow-body">
+                            <strong><code>src/index.ts</code> → <code>Game.ts</code></strong>
+                            <p>Zobacz, jak powstaje scena, światła, kamera i wszystkie zależności. Zwróć uwagę na komentarz przy <code>Horizon</code>.</p>
+                        </div>
+                    </div>
+                    <div class="flow-step">
+                        <div class="flow-num">2</div>
+                        <div class="flow-body">
+                            <strong><code>Session.ts</code></strong>
+                            <p>To najkrótszy pełny opis zasad: walidacja, punkty, flood fill, timer, game over. Czytaj bez zaglądania do Three.js.</p>
+                        </div>
+                    </div>
+                    <div class="flow-step">
+                        <div class="flow-num">3</div>
+                        <div class="flow-body">
+                            <strong><code>Board.ts</code> → <code>Tile.ts</code></strong>
+                            <p>Zobacz, czym naprawdę jest plansza: czterema zbiorami i seedem. Potem sprawdź, jak kafel liczy wartość i rozszerza <code>accessible</code>.</p>
+                        </div>
+                    </div>
+                    <div class="flow-step">
+                        <div class="flow-num">4</div>
+                        <div class="flow-body">
+                            <strong><code>ChunkManager.ts</code> → <code>Chunk.ts</code></strong>
+                            <p>Prześledź streaming, maskę mgły, marker i cykl życia. To największy plik i centrum renderu.</p>
+                        </div>
+                    </div>
+                    <div class="flow-step">
+                        <div class="flow-num">5</div>
+                        <div class="flow-body">
+                            <strong><code>Terrain.ts</code> → <code>TerrainSurface.ts</code></strong>
+                            <p>Zobacz, jak jedna funkcja wysokości staje się siatką. Sprawdź <code>heightAtWorld</code> i podział trójkątów.</p>
+                        </div>
+                    </div>
+                    <div class="flow-step">
+                        <div class="flow-num">6</div>
+                        <div class="flow-body">
+                            <strong><code>PlayerController.ts</code> → <code>Player.ts</code></strong>
+                            <p>Dopiero teraz wejdź w sterowanie: pointer lock, ruch, raycast i powiązanie kliknięć z <code>Session</code>.</p>
+                        </div>
+                    </div>
+                    <div class="flow-step">
+                        <div class="flow-num">7</div>
+                        <div class="flow-body">
+                            <strong>Warstwa wizualna: <code>Marker</code>, <code>Decoration</code>, <code>BombMushroom</code>, <code>Fog</code>, <code>Flag</code></strong>
+                            <p>To rzeczy, które można zmieniać bez ruszania reguł. Czytaj je jako konsumentów stanu z <code>Chunk</code>.</p>
+                        </div>
+                    </div>
+                    <div class="flow-step">
+                        <div class="flow-num">8</div>
+                        <div class="flow-body">
+                            <strong><code>coords.ts</code> i <code>random.ts</code></strong>
+                            <p>Na końcu wróć do dwóch małych utility. Ich stałe i wzory wyjaśniają większość „magicznych liczb” w projekcie.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <h3>Szybka mapa plików</h3>
+                <div class="file-list">
+                    <div class="file"><code>src/index.ts</code><span>start aplikacji</span></div>
+                    <div class="file"><code>src/components/Game.ts</code><span>composition root, scena, pętla, HUD</span></div>
+                    <div class="file"><code>src/components/Renderer.ts</code><span>WebGLRenderer i resize</span></div>
+                    <div class="file"><code>src/components/Session.ts</code><span>reguły, punkty, timer</span></div>
+                    <div class="file"><code>src/components/Player.ts</code><span>raycast i crosshair</span></div>
+                    <div class="file"><code>src/components/PlayerController.ts</code><span>ruch i wejście</span></div>
+                    <div class="file"><code>src/components/board/Board.ts</code><span>stan planszy i bomby</span></div>
+                    <div class="file"><code>src/components/board/Tile.ts</code><span>wartość, otwarcie, flaga</span></div>
+                    <div class="file"><code>src/components/board/ChunkManager.ts</code><span>streaming chunków</span></div>
+                    <div class="file"><code>src/components/board/Chunk.ts</code><span>meshe chunka i mgła</span></div>
+                    <div class="file"><code>src/components/board/Terrain.ts</code><span>wysokości i kolory</span></div>
+                    <div class="file"><code>src/components/board/TerrainSurface.ts</code><span>wspólna geometria terenu</span></div>
+                    <div class="file"><code>src/components/board/Marker.ts</code><span>bloom planty i litter</span></div>
+                    <div class="file"><code>src/components/board/Decoration.ts</code><span>GLB i instancje natury</span></div>
+                    <div class="file"><code>src/components/board/InstancedProp.ts</code><span>części modeli i widoczność</span></div>
+                    <div class="file"><code>src/components/board/BombMushroom.ts</code><span>grzyb bomby</span></div>
+                    <div class="file"><code>src/components/board/Fog.ts</code><span>tekstura chmur</span></div>
+                    <div class="file"><code>src/components/board/Flag.ts</code><span>flaga OBJ/MTL i fallback</span></div>
+                    <div class="file"><code>src/components/board/Horizon.ts</code><span>daleki teren (ukryty)</span></div>
+                    <div class="file"><code>src/utils/coords.ts</code><span>stałe, klucze, hash</span></div>
+                    <div class="file"><code>src/utils/random.ts</code><span>mulberry32</span></div>
+                    <div class="file"><code>index.html</code>, <code>src/style.css</code><span>HUD i wygląd</span></div>
+                </div>
+
+                <div class="callout">
+                    <strong>Polecenia projektu.</strong> <code>npm run dev</code> uruchamia Vite na porcie
+                    8080. <code>npx tsc --noEmit</code> sprawdza typy. <code>npm run build</code> robi
+                    <code>tsc &amp;&amp; vite build</code>. Nie ma testów ani lintera.
+                </div>
+            </section>
+
+            <section id="slownik">
+                <div class="section-kicker"><span>20</span> Słownik</div>
+                <h2>Pojęcia używane w kodzie i w tym dokumencie</h2>
+                <p class="lead">
+                    Część terminów pochodzi z <code>GLOSSARY.md</code>, część jest techniczna. Warto ich
+                    używać konsekwentnie, bo w tym projekcie „marker”, „dekoracja” i „mgła” mają różne
+                    właściciele.
+                </p>
+
+                <dl class="glossary">
+                    <div class="term"><dt>Bloom marker</dt><dd>Marker odkrytego bezpiecznego kafla z liczbą. Roślina z tyloma kwiatami, ile sąsiednich bomb. Pusty kafel nie ma markera.</dd></div>
+                    <div class="term"><dt>Petal litter</dt><dd>Płatki wokół podstawy bloom markera w tym samym kolorze co kwiaty. Kodują kolor na odległość, nie drugą liczbę.</dd></div>
+                    <div class="term"><dt>Bomb mushroom</dt><dd>Duży czerwony grzyb na odkrytym bombowym kaflu. Pojawia się tylko po przegranej, razem ze spore litter.</dd></div>
+                    <div class="term"><dt>Bomb reveal</dt><dd>Ujawnienie wszystkich bomb po przegranej, także w chunkach doładowanych później dzięki <code>bombsRevealed</code>.</dd></div>
+                    <div class="term"><dt>Chunk</dt><dd>Kwadrat 16×16 kafli, czyli 256 kafli i 560×560 jednostek świata. Jednostka streamingu i właściciel meshy.</dd></div>
+                    <div class="term"><dt>Kafel / Tile</dt><dd>Pojedyncza komórka planszy. Ma wartość, stan otwarcia i flagę, ale nie ma własnej geometrii.</dd></div>
+                    <div class="term"><dt>Maska mgły</dt><dd>Tekstura 16×16 w chunku. 255 oznacza ukryty kafel, 0 odkryty. Shader mgły próbkuje ją i modyfikuje alpha.</dd></div>
+                    <div class="term"><dt>Accessible</dt><dd>Zbiór kafli, po których gracz może chodzić i które może kliknąć. Rozszerza się o margines 3 wokół każdego otwartego kafla.</dd></div>
+                    <div class="term"><dt>Safe zone</dt><dd>Stała strefa 3×3 wokół pierwszego otwartego kafla. W niej <code>isBomb</code> zawsze zwraca <code>false</code>.</dd></div>
+                    <div class="term"><dt>Session</dt><dd>Warstwa reguł: punkty, czas, flagi, otwieranie, flood fill i game over. Nie dotyka DOM.</dd></div>
+                    <div class="term"><dt>SessionView</dt><dd>Interfejs widoku implementowany przez <code>Game</code>: <code>renderSession</code> i <code>showGameOver</code>. Session wysyła snapshot, nie zna DOM.</dd></div>
+                    <div class="term"><dt>packKey</dt><dd>Jedna liczba całkowita reprezentująca parę współrzędnych kafla. Używana w zbiorach <code>Set&lt;number&gt;</code>.</dd></div>
+                    <div class="term"><dt>chunkKey</dt><dd>Jedna liczba całkowita reprezentująca parę współrzędnych chunka. Klucz w <code>Map&lt;number, Chunk&gt;</code>.</dd></div>
+                    <div class="term"><dt>Instancing</dt><dd>Renderowanie wielu kopii tej samej geometrii jednym draw callem. Widoczność pojedynczej kopii to skala 0 w macierzy.</dd></div>
+                    <div class="term"><dt>Raycast</dt><dd>Promień ze środka kamery w terrain meshe. Zwraca punkt świata, z którego powstaje <code>Tile</code>.</dd></div>
+                    <div class="term"><dt>Fade</dt><dd>Animacja mgły trwająca 0,35 s. Marker czeka w <code>pendingMarkers</code> do jej końca.</dd></div>
+                </dl>
+
+                <div class="callout ok">
+                    <strong>Najkrótsze podsumowanie.</strong> <code>Session</code> decyduje, <code>Board</code>
+                    pamięta, <code>Terrain</code> liczy, <code>Chunk</code> rysuje, a <code>Game</code> spina
+                    wszystko w jedną pętlę.
+                </div>
+            </section>
+
+        </main>
+    </div>
+
+    <footer class="footer">
+        <p><strong>3D Minesweeper</strong> — walkthrough architektury. Kod źródłowy jest jedynym źródłem prawdy; ten dokument opisuje jego aktualny kształt.</p>
+        <p class="mono">npm run dev · npx tsc --noEmit · npm run build</p>
+    </footer>
+
+    <script>
+        (function () {
+            var root = document.documentElement;
+            var themeButton = document.getElementById('theme-toggle');
+            var themeLabel = themeButton ? themeButton.querySelector('.theme-label') : null;
+
+            function syncThemeLabel() {
+                if (themeLabel) {
+                    themeLabel.textContent = root.dataset.theme === 'light' ? 'Ciemny' : 'Jasny';
+                }
+            }
+
+            function toggleTheme() {
+                root.dataset.theme = root.dataset.theme === 'light' ? 'dark' : 'light';
+                try {
+                    localStorage.setItem('minesweeper-doc-theme', root.dataset.theme);
+                } catch (error) { /* ignoruj */ }
+                syncThemeLabel();
+            }
+
+            if (themeButton) {
+                themeButton.addEventListener('click', toggleTheme);
+            }
+            syncThemeLabel();
+
+            var toc = document.getElementById('toc');
+            var tocToggle = document.getElementById('toc-toggle');
+            if (toc && tocToggle) {
+                tocToggle.addEventListener('click', function () {
+                    var open = toc.classList.toggle('open');
+                    tocToggle.setAttribute('aria-expanded', String(open));
+                });
+                toc.addEventListener('click', function (event) {
+                    if (event.target.closest('a') && window.matchMedia('(max-width: 980px)').matches) {
+                        toc.classList.remove('open');
+                        tocToggle.setAttribute('aria-expanded', 'false');
+                    }
+                });
+            }
+
+            var tocLinks = Array.prototype.slice.call(document.querySelectorAll('.toc-nav a'));
+            var linkById = new Map();
+            tocLinks.forEach(function (link) {
+                linkById.set(link.getAttribute('href').slice(1), link);
+            });
+
+            if ('IntersectionObserver' in window) {
+                var observer = new IntersectionObserver(function (entries) {
+                    entries.forEach(function (entry) {
+                        if (!entry.isIntersecting) return;
+                        tocLinks.forEach(function (link) { link.classList.remove('active'); });
+                        var active = linkById.get(entry.target.id);
+                        if (active) active.classList.add('active');
+                    });
+                }, { rootMargin: '-18% 0px -68% 0px', threshold: 0 });
+
+                document.querySelectorAll('main section[id]').forEach(function (section) {
+                    observer.observe(section);
+                });
+            }
+
+            function setupTabs(group) {
+                var tabs = Array.prototype.slice.call(group.querySelectorAll('[role="tab"]'));
+                var panels = Array.prototype.slice.call(group.querySelectorAll('[role="tabpanel"]'));
+                if (!tabs.length) return;
+
+                function select(tab) {
+                    tabs.forEach(function (item) {
+                        var selected = item === tab;
+                        item.setAttribute('aria-selected', String(selected));
+                        item.tabIndex = selected ? 0 : -1;
+                    });
+                    panels.forEach(function (panel) {
+                        panel.hidden = panel.id !== tab.getAttribute('aria-controls');
+                    });
+                }
+
+                tabs.forEach(function (tab, index) {
+                    tab.addEventListener('click', function () { select(tab); });
+                    tab.addEventListener('keydown', function (event) {
+                        var next = null;
+                        if (event.key === 'ArrowRight') next = tabs[(index + 1) % tabs.length];
+                        if (event.key === 'ArrowLeft') next = tabs[(index - 1 + tabs.length) % tabs.length];
+                        if (event.key === 'Home') next = tabs[0];
+                        if (event.key === 'End') next = tabs[tabs.length - 1];
+                        if (next) {
+                            event.preventDefault();
+                            select(next);
+                            next.focus();
+                        }
+                    });
+                });
+
+                select(tabs[0]);
+            }
+
+            document.querySelectorAll('[data-tabs]').forEach(setupTabs);
+
+            var coordX = document.getElementById('coord-x');
+            var coordZ = document.getElementById('coord-z');
+            var coordError = document.getElementById('coord-error');
+            var outCenter = document.getElementById('out-center');
+            var outChunk = document.getElementById('out-chunk');
+            var outLocal = document.getElementById('out-local');
+            var outOrigin = document.getElementById('out-origin');
+            var outPack = document.getElementById('out-pack');
+            var outChunkKey = document.getElementById('out-chunk-key');
+
+            if (coordX && coordZ && coordError) {
+                var integerFormat = new Intl.NumberFormat('pl-PL');
+                var centerFormat = new Intl.NumberFormat('pl-PL', { maximumFractionDigits: 1 });
+
+                function updateCalculator() {
+                    var x = Number(coordX.value);
+                    var z = Number(coordZ.value);
+                    var messages = [];
+
+                    if (!Number.isFinite(x) || !Number.isFinite(z)) {
+                        messages.push('Wpisz liczby całkowite.');
+                        x = 0;
+                        z = 0;
+                    }
+                    if (!Number.isInteger(x) || !Number.isInteger(z)) {
+                        messages.push('Współrzędne kafla muszą być całkowite.');
+                        x = Math.trunc(x);
+                        z = Math.trunc(z);
+                    }
+                    if (x < -131072 || x > 131071 || z < -131072 || z > 131071) {
+                        messages.push('Poza bezpiecznym zakresem packKey (±131 072).');
+                    }
+
+                    var cx = Math.floor(x / 16);
+                    var cz = Math.floor(z / 16);
+                    var localX = ((x % 16) + 16) % 16;
+                    var localZ = ((z % 16) + 16) % 16;
+                    var pack = (x + 131072) * 262144 + (z + 131072);
+                    var chunkKey = (cx + 32768) * 65536 + (cz + 32768);
+
+                    outCenter.textContent = centerFormat.format((x + 0.5) * 35) + ', ' + centerFormat.format((z + 0.5) * 35);
+                    outChunk.textContent = cx + ', ' + cz;
+                    outLocal.textContent = localX + ', ' + localZ;
+                    outOrigin.textContent = integerFormat.format(cx * 16 * 35) + ', ' + integerFormat.format(cz * 16 * 35);
+                    outPack.textContent = integerFormat.format(pack);
+                    outChunkKey.textContent = integerFormat.format(chunkKey);
+                    coordError.textContent = messages.join(' ');
+                }
+
+                coordX.addEventListener('input', updateCalculator);
+                coordZ.addEventListener('input', updateCalculator);
+                updateCalculator();
+            }
+        }());
+    </script>
+</body>
+</html>
