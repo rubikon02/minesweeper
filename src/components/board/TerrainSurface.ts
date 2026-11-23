@@ -11,8 +11,8 @@ export interface TerrainSurfaceOptions {
     originZ: number
     // Number of cells along each axis.
     cells: number
-    // World size of one cell. Origins and steps sit on tile-grid corners so
-    // every sample is an exact corner height.
+    // World size of one cell. Origins and steps align with the terrain's
+    // sub-grid so the mesh matches heightAtWorld exactly.
     step: number
 }
 
@@ -45,10 +45,10 @@ export function buildTerrainSurface(
             const gx1 = x1 / terrain.tileSize
             const gz1 = z1 / terrain.tileSize
 
-            const ha = terrain.heightAt(gx0, gz0)
-            const hb = terrain.heightAt(gx1, gz0)
-            const hc = terrain.heightAt(gx0, gz1)
-            const hd = terrain.heightAt(gx1, gz1)
+            const ha = terrain.terraceHeightAt(x0, z0)
+            const hb = terrain.terraceHeightAt(x1, z0)
+            const hc = terrain.terraceHeightAt(x0, z1)
+            const hd = terrain.terraceHeightAt(x1, z1)
 
             // Triangles a,d,b then a,c,d.
             // a = (x0,z0) b = (x1,z0) c = (x0,z1) d = (x1,z1)

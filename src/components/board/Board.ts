@@ -3,8 +3,10 @@ import Flag from './Flag'
 import type Chunk from './Chunk'
 import Terrain from './Terrain'
 import Decoration from './Decoration'
-import BombMushroom from './BombMushroom'
 import ChunkManager from './ChunkManager'
+import { loadActiveConfig } from './markers/MarkerConfig'
+import MarkerModels from './markers/MarkerModels'
+import type { MarkerConfig } from './markers/MarkerConfig'
 import { hash2, packKey, ACCESS_MARGIN } from '../../utils/coords'
 import type Game from '../Game'
 import type Tile from './Tile'
@@ -19,8 +21,10 @@ export default class Board {
 
     public terrain: Terrain
     public decoration: Decoration
-    public bombMushroom: BombMushroom
     public chunkManager: ChunkManager
+    // Fixed for the whole run; the settings panel edits a draft and applies
+    // it through Game.startWithConfig before the next board is built.
+    public markerConfig: MarkerConfig
 
     public opened = new Set<number>()
     public flagged = new Set<number>()
@@ -47,6 +51,7 @@ export default class Board {
         this.tileSize = 35
         this.bombsDensity = 0.13
         this.seed = Math.floor(Math.random() * 1000000000)
+        this.markerConfig = loadActiveConfig()
 
         Flag.preload(this.game.manager, flag => {
             this.preloadedFlag = flag
@@ -57,18 +62,12 @@ export default class Board {
         this.decoration.setSeed(this.seed)
         this.decoration.onReady = () => this.chunkManager.rebuildDecorations()
 
-        // Loaded eagerly so the end-of-game reveal never pops in.
-        this.bombMushroom = new BombMushroom(this)
-        this.bombMushroom.onReady = () => {
-            for (const chunk of this.chunkManager.chunks.values()) {
-                chunk.refreshMarkers()
-            }
-        }
-
         this.chunkManager = new ChunkManager(this)
 
         this.seedStart()
         this.chunkManager.update(this.tileSize * 0.5, this.tileSize * 0.5, 0)
+
+        MarkerModels.load(this.game.manager).then(() => this.chunkManager.rebuildMarkers())
     }
 
     // Give the player a small walkable patch at spawn before anything is
@@ -169,6 +168,16 @@ export default class Board {
         this.chunkManager.update(playerX, playerZ, delta)
     }
 
+    // Flag meshes live on the scene root rather than inside a chunk, so a
+    // restart must remove them explicitly before rebuilding the board.
+    private clearFlagMeshes(): void {
+        const flags: Object3D[] = []
+        this.game.scene.traverse(object => {
+            if (object.userData.isFlag === true) flags.push(object)
+        })
+        for (const flag of flags) flag.removeFromParent()
+    }
+
     public restart(): void {
         this.started = false
         this.bombsRevealed = false
@@ -186,6 +195,7 @@ export default class Board {
         this.terrain.reseed(this.seed)
         this.decoration.setSeed(this.seed)
 
+        this.clearFlagMeshes()
         this.seedStart()
         this.chunkManager.clear()
         this.chunkManager.update(this.tileSize * 0.5, this.tileSize * 0.5, 0)

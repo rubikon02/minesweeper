@@ -27,15 +27,19 @@
 
         <div class="hud-card stats-card">
             <div class="stat-line">
-                <span class="stat-icon">🧹</span>
+                <span class="stat-icon" aria-hidden="true"></span>
                 <span class="stat-label">Cleared:</span>
                 <span id="minesCount" class="stat-val">0</span>
             </div>
             <div class="stat-line">
-                <span class="stat-icon">⏱️</span>
+                <span class="stat-icon stat-icon-time" aria-hidden="true"></span>
                 <span class="stat-label">Time:</span>
                 <span id="timeCount" class="stat-val">0s</span>
             </div>
+        </div>
+
+        <div class="hud-card hud-settings-card">
+            <button id="settingsBtn" class="hud-settings-btn"><span class="hud-settings-mark" aria-hidden="true"></span><span>Markery</span><kbd>O</kbd></button>
         </div>
 
         <div class="hud-card controls-card">
@@ -67,6 +71,10 @@
             <div class="control-row">
                 <span class="key-badge">R</span>
                 <span class="key-desc">Restart</span>
+            </div>
+            <div class="control-row">
+                <span class="key-badge">O</span>
+                <span class="key-desc">Markers</span>
             </div>
             <div class="control-row">
                 <span class="key-badge">Click</span>

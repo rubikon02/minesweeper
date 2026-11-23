@@ -31,6 +31,11 @@ Entry: `src/index.ts` mounts `Game` into `#root`.
 - `src/components/Game.ts` — owns scene, camera, renderer, board, horizon,
   player, controller. Owns HUD/score/timer state and the `requestAnimationFrame`
   loop. Constructs the world view. Restart resets board, horizon, and player.
+- `src/components/SettingsPanel.ts` — compact side drawer for marker config.
+  Nine rows (`1–8` and `bomb`). Editable only before a run; in play it is a
+  read-only summary. Drag a row (or use arrows + Space) to swap the motif
+  assigned to two values. Colours, counts, presets and saved layouts are gone.
+  Starting a game is the only path that assigns a new config to the board.
 - `src/components/Renderer.ts` — `WebGLRenderer` subclass; sizes to window,
   shadows disabled.
 - `src/components/Player.ts` — raycasts the center of the camera against
@@ -52,9 +57,9 @@ Entry: `src/index.ts` mounts `Game` into `#root`.
   farther ones, owns `meshList` for raycasting.
 - `src/components/board/Chunk.ts` — one merged terrain mesh, one merged fog
   mesh with a per-chunk reveal mask (`DataTexture`, 255 hidden / 0 shown),
-  one merged marker mesh, instanced decoration, and instanced bomb mushrooms.
-  All geometry is local to the chunk origin; the chunk group carries the world
-  offset.
+  marker `InstancedMesh`es (plus a merged fallback for procedural motifs) and
+  instanced decoration. All geometry is local to the chunk origin; the chunk
+  group carries the world offset.
 - `src/components/board/Tile.ts` — logical tile only: value, open state,
   flag. Value comes from `Board.isBomb`; markers are registered on the chunk.
   Empty tiles flood-open iteratively.
@@ -62,30 +67,42 @@ Entry: `src/index.ts` mounts `Game` into `#root`.
   pure function of grid corner, memoised. `tileCorners`, `surfaceY`,
   `heightAtWorld` (matches rendered triangles), `colorFor` (grass/rock/snow).
 - `src/components/board/Decoration.ts` — loads GLB nature models, builds
-  `InstancedMesh` props per chunk, hides props on unrevealed tiles. Props
-  rebuild after async load via `onReady -> chunkManager.rebuildDecorations()`.
+  `InstancedMesh` props per chunk, hides props on unrevealed tiles. Each prop
+  is sunk by its template floor so the lowest point meets the terrain instead
+  of floating. Props rebuild after async load via
+  `onReady -> chunkManager.rebuildDecorations()`.
+- `src/components/board/FieldDetails.ts` — rounded procedural lakes and flat,
+  rounded-rectangular furrow-texture grain beds for empty tiles. Registered
+  like nature models so chunks draw them through the same instanced path.
+- `src/components/board/Trail.ts` — rare beaten crossings on the sloped tile
+  borders. A shared edge is hashed once so both neighbouring tiles generate
+  the same straight ribbon; the chunk reveal mask hides unrevealed halves.
 - `src/components/board/InstancedProp.ts` — shared instanced-model seam:
   `collectModelParts` flattens a loaded GLB into root-relative parts,
-  `prepareNatureModel` fixes the kit's metallic materials, `DecoInstance`
-  places one part across every `InstancedMesh` of its template.
+  `centerTemplate` corrects off-centre pivots, `templateFloor` measures its
+  lowest point, `prepareNatureModel` fixes the kit's metallic materials,
+  `DecoInstance` places one part across every `InstancedMesh` of its template.
 - `src/components/board/Flag.ts` — preloads `flag.obj`/`flag.mtl`, clones per
   tile, hides with chunk disposal, falls back to a primitive pole/cone.
 - `src/components/board/Fog.ts` — shared cloud canvas texture.
-- `src/components/board/Marker.ts` — procedural low-poly tile markers:
-  bloom plants for numbers, spore litter for bombs. `buildMarkerGeometry` is
-  the pure seam (entries + height sampler + chunk origin in, merged
-  vertex-colored geometry out); all chunks share one flat-shaded
-  `MeshStandardMaterial`.
-- `src/components/board/BombMushroom.ts` — loads the bomb mushroom GLB and
-  builds one `InstancedMesh` per model part per chunk for revealed bomb tiles.
-  Eager load; no fallback, so a failed load leaves bomb tiles bare.
+- `src/components/board/Marker.ts` — plans instanced copies of CC0 models and
+  builds the merged fallback for procedural motifs. `planMarkers` turns
+  entries + config into per-model batches of matrices; `buildMarkerGeometry`
+  keeps the pure height-sampler seam for the fallback. All chunks share one
+  flat-shaded, vertex-coloured `MeshStandardMaterial`. No roads.
+- `src/components/board/markers/` — configuration/storage, shape catalog,
+  `MarkerModels.ts` CC0 loader/baker, procedural primitives for the mine,
+  placement and 2D preview. Copy counts are derived (`1–8` → value, bomb → 1);
+  each value owns one motif with one fixed look. Credits are in
+  `ASSET_CREDITS.md`.
 - `src/components/board/Horizon.ts` — coarse far-terrain mesh from the same
   height function.
 - `src/utils/coords.ts` — `CHUNK_SIZE = 16`, `CHUNK_RADIUS = 3`,
   `ACCESS_MARGIN = 3`, `packKey`, `chunkKey`, `hash2`.
 - `src/utils/random.ts` — `mulberry32`.
-- `src/style.css` + `index.html` — HUD (`#points`, `#minesCount` = cleared
-  tiles, `#timeCount`, `#crosshair`, `#popup`) and control legend.
+- `src/style.css` + `index.html` — small top-right HUD (`#points`,
+  `#minesCount` = cleared tiles, `#timeCount`, `#crosshair`, `#popup`), control
+  legend and the dark side drawer. UI marks are CSS-only; no emoji glyphs.
 
 ## Coordinates and Units
 
@@ -128,10 +145,22 @@ Entry: `src/index.ts` mounts `Game` into `#root`.
 - Asset imports rely on declarations in `src/vite-env.d.ts` and
   `assetsInclude` in `vite.config.ts`. Add both for new extensions.
 - Bird's-eye mode frees movement from the accessible-area clamp.
-- `mushroom_bomb.glb` is Y-up only through its node rotation; the geometry
-  itself is Z-up. Do not add another rotation. The model is scaled to
-  `HEIGHT` at load, so authored units and pivot do not matter, but the
-  fallback-free load means a missing asset shows no bomb marker at all.
+- Marker copy counts are derived from the tile value (`defaultCount`);
+  `placeSymbols` and `planMarkers` must agree on that count even for `center`
+  motifs, otherwise the panel and the 3D tile disagree.
+- Loaded marker models are shared geometry: never dispose them with a chunk.
+  Only `InstancedMesh` buffers and the merged fallback geometry are per chunk.
+  Models load asynchronously; `ChunkManager.rebuildMarkers()` redraws chunks
+  once they arrive.
+- Baked texture/vertex colours must be written to the geometry's `color`
+  attribute. The shared material has `vertexColors`, so a missing attribute
+  renders the model black.
+- `MarkerModels` normalises X/Z to the shape footprint and Y to a fixed target
+  height. `planMarkers` tilts instances to the local terrain normal because a
+  rigid instanced base cannot follow each terrain triangle like the merged
+  fallback; keep both paths in sync when changing model proportions.
+- Roads were removed entirely; revealing or restoring a plain open tile does
+  not mark marker geometry dirty.
 
 ## Boundaries
 

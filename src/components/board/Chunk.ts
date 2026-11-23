@@ -13,7 +13,10 @@ import {
 
 import Tile from './Tile'
 import { getCloudTexture } from './Fog'
-import { buildMarkerGeometry, getMarkerMaterial } from './Marker'
+import Trail from './Trail'
+import {
+    buildMarkerGeometry, createMarkerEnvironment, getMarkerMaterial, planMarkers
+} from './Marker'
 import { buildTerrainSurface } from './TerrainSurface'
 import { CHUNK_SIZE, packKey } from '../../utils/coords'
 import type Board from './Board'
@@ -36,23 +39,24 @@ export default class Chunk {
 
     public terrainMesh: Mesh
     public fogMesh: Mesh
+    public trailMesh: Mesh
 
     private geometry: BufferGeometry
+    private trailGeometry: BufferGeometry
+    private trailMaterial: MeshStandardMaterial
     private fogMaterial: MeshStandardMaterial
     private maskData: Uint8Array
     private maskTexture: DataTexture
     private anim = new Map<number, number>()
 
     private markerMesh: Mesh
+    private markerInstances: InstancedMesh[] = []
     private markerEntries = new Map<number, MarkerEntry>()
     private pendingMarkers = new Map<number, Tile>()
     private markerDirty = false
 
     public decoByTile = new Map<number, DecoInstance[]>()
     private decoMeshes: InstancedMesh[] = []
-    // Bomb mushrooms are marker state, so they are cleared with the marker
-    // mesh rather than with the scenery props.
-    private bombMeshes: InstancedMesh[] = []
 
     constructor(board: Board, cx: number, cz: number) {
         this.board = board
@@ -68,11 +72,12 @@ export default class Chunk {
         board.game.scene.add(this.group)
 
         this.createTiles()
+        const subdivisions = board.terrain.subdivisions
         this.geometry = buildTerrainSurface(board.terrain, {
             originX: this.originX,
             originZ: this.originZ,
-            cells: CHUNK_SIZE,
-            step: ts,
+            cells: CHUNK_SIZE * subdivisions,
+            step: ts / subdivisions,
         })
         this.maskData = new Uint8Array(CHUNK_SIZE * CHUNK_SIZE).fill(255)
         this.maskTexture = this.buildMaskTexture()
@@ -86,10 +91,20 @@ export default class Chunk {
         this.fogMesh.position.y = 0.4
         this.group.add(this.fogMesh)
 
+        // Rare worn crossings follow the sloped tile borders. The reveal mask
+        // is shared with the fog, so trails appear with their tile for free.
+        this.trailGeometry = Trail.buildGeometry(board.terrain, this)
+        this.trailMaterial = Trail.buildMaterial(this.maskTexture, this.size)
+        this.trailMesh = new Mesh(this.trailGeometry, this.trailMaterial)
+        this.trailMesh.raycast = () => void 0
+        this.group.add(this.trailMesh)
+
         this.markerMesh = new Mesh(new BufferGeometry(), getMarkerMaterial())
         this.markerMesh.visible = false
         this.markerMesh.raycast = () => void 0
-        this.markerMesh.frustumCulled = false
+        // The merged geometry has a valid local bounding sphere; culling whole
+        // chunks is essential once textured models add thousands of triangles.
+        this.markerMesh.frustumCulled = true
         this.group.add(this.markerMesh)
 
         // Scatter props, then apply the persisted reveal state.
@@ -229,32 +244,61 @@ export default class Chunk {
         this.addMarker(idx, tile)
     }
 
-    // Merge every marker in the chunk into one vertex-coloured geometry, and
-    // rebuild the instanced bomb mushrooms for the same entries.
+    // Shared model geometry is instanced; only the procedural mine (and any
+    // asset that failed to load) still uses a merged fallback mesh.
     private rebuildMarkers(): void {
         this.markerDirty = false
         this.markerMesh.geometry.dispose()
+        this.releaseMarkerInstances()
 
         const entries = Array.from(this.markerEntries.values())
-        this.board.bombMushroom.populate(
-            this,
-            entries.filter(entry => entry.value === 'bomb')
-        )
-
         if (entries.length === 0) {
             this.markerMesh.geometry = new BufferGeometry()
             this.markerMesh.visible = false
             return
         }
 
-        const geometry = buildMarkerGeometry(
-            entries,
-            (x, z) => this.board.terrain.heightAtWorld(x, z),
-            this.originX,
-            this.originZ
-        )
-        this.markerMesh.geometry = geometry
-        this.markerMesh.visible = true
+        const environment = createMarkerEnvironment(this.board.terrain, this.board.tileSize)
+        const plan = planMarkers(entries, environment, this.originX, this.originZ, this.board.markerConfig)
+        const material = getMarkerMaterial()
+
+        for (const batch of plan.batches) {
+            const mesh = new InstancedMesh(batch.geometry, material, batch.matrices.length)
+            for (let i = 0; i < batch.matrices.length; i++) {
+                mesh.setMatrixAt(i, batch.matrices[i])
+            }
+            mesh.instanceMatrix.needsUpdate = true
+            mesh.computeBoundingSphere()
+            mesh.raycast = () => void 0
+            this.group.add(mesh)
+            this.markerInstances.push(mesh)
+        }
+
+        if (plan.fallback.length > 0) {
+            this.markerMesh.geometry = buildMarkerGeometry(
+                plan.fallback,
+                environment,
+                this.originX,
+                this.originZ,
+                this.board.markerConfig
+            )
+            this.markerMesh.visible = true
+        } else {
+            this.markerMesh.geometry = new BufferGeometry()
+            this.markerMesh.visible = false
+        }
+    }
+
+    private releaseMarkerInstances(): void {
+        for (const mesh of this.markerInstances) {
+            this.group.remove(mesh)
+            mesh.dispose()
+        }
+        this.markerInstances = []
+    }
+
+    public markMarkersDirty(): void {
+        this.markerDirty = true
     }
 
     // Ask the decoration manager to fill this chunk with props.
@@ -267,11 +311,6 @@ export default class Chunk {
         this.group.add(mesh)
     }
 
-    public registerBombMesh(mesh: InstancedMesh): void {
-        this.bombMeshes.push(mesh)
-        this.group.add(mesh)
-    }
-
     // The part geometry and materials are shared by every chunk, so only the
     // instance buffers belong to this chunk.
     private releaseMeshes(meshes: InstancedMesh[]): void {
@@ -279,16 +318,6 @@ export default class Chunk {
             this.group.remove(mesh)
             mesh.dispose()
         }
-    }
-
-    public clearBombMushrooms(): void {
-        this.releaseMeshes(this.bombMeshes)
-        this.bombMeshes = []
-    }
-
-    // Let a late-loaded bomb model fill in bombs that are already revealed.
-    public refreshMarkers(): void {
-        this.markerDirty = true
     }
 
     public setDecoVisible(tile: Tile, visible: boolean): void {
@@ -360,10 +389,12 @@ export default class Chunk {
         }
         this.board.game.scene.remove(this.group)
         this.clearDecoration()
-        this.clearBombMushrooms()
         this.geometry.dispose()
+        this.trailGeometry.dispose()
+        this.trailMaterial.dispose()
         this.maskTexture.dispose()
         this.fogMaterial.dispose()
         this.markerMesh.geometry.dispose()
+        this.releaseMarkerInstances()
     }
 }

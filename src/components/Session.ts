@@ -75,16 +75,16 @@ export default class Session {
         if (!this.board.isTileAccessible(tile.x, tile.z)) return
         if (tile.isOpen()) return
 
+        // Flagging is only a note to the player. It neither costs nor earns
+        // points, so a wrong flag never punishes an otherwise good run.
         if (tile.flag.isVisible()) {
             tile.flag.setVisible(false)
             this.board.removeFlag(tile.x, tile.z)
             this.flagsPlaced = Math.max(0, this.flagsPlaced - 1)
-            this.award(this.isBombTile(tile) ? -50 : 75)
         } else {
             tile.flag.setVisible(true)
             this.board.addFlag(tile.x, tile.z)
             this.flagsPlaced++
-            this.award(this.isBombTile(tile) ? 50 : -75)
         }
         this.render(0)
     }
@@ -96,10 +96,6 @@ export default class Session {
         this.flagsPlaced = 0
         this.over = false
         this.render(0)
-    }
-
-    private isBombTile(tile: Tile): boolean {
-        return tile.value === 'bomb' || this.board.isBomb(tile.x, tile.z)
     }
 
     private award(difference: number): void {

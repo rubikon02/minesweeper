@@ -1,4 +1,6 @@
 import {
+    Mesh,
+    MeshStandardMaterial,
     Object3D,
     InstancedMesh,
     Vector3
@@ -6,44 +8,55 @@ import {
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 
 import mulberry32 from '../../utils/random'
-import { packKey } from '../../utils/coords'
-import DecoInstance, { collectModelParts, prepareNatureModel } from './InstancedProp'
+import { hash2, packKey } from '../../utils/coords'
+import DecoInstance, { centerTemplate, collectModelParts, prepareNatureModel, templateFloor } from './InstancedProp'
+import FieldDetails from './FieldDetails'
 import type { Part } from './InstancedProp'
-import treeA from '../../assets/nature/tree_default.glb'
-import treeB from '../../assets/nature/tree_pineDefaultA.glb'
-import treeC from '../../assets/nature/tree_pineSmallA.glb'
-import treeD from '../../assets/nature/tree_simple.glb'
-import rockA from '../../assets/nature/rock_smallA.glb'
-import rockB from '../../assets/nature/rock_smallC.glb'
-import rockC from '../../assets/nature/rock_largeA.glb'
-import bushA from '../../assets/nature/plant_bush.glb'
-import bushB from '../../assets/nature/plant_bushSmall.glb'
-import plantA from '../../assets/nature/plant_flatTall.glb'
-import grassA from '../../assets/nature/grass.glb'
+import treeA from '../../assets/nature/kenney_tree.glb'
+import treeB from '../../assets/nature/kenney_treeLarge.glb'
+import rockA from '../../assets/nature/kenney_rock.glb'
+import rockB from '../../assets/nature/kenney_rockFlat.glb'
+import bushA from '../../assets/nature/kenney_plant.glb'
+import bushB from '../../assets/nature/kenney_twig.glb'
+import mushroomA from '../../assets/nature/kenney_mushroom.glb'
+import grassA from '../../assets/nature/kenney_grass.glb'
 import type Board from './Board'
 import type Chunk from './Chunk'
 import type Tile from './Tile'
 
-type Kind = 'tree' | 'rock' | 'bush' | 'grass'
+type Kind = 'tree' | 'rock' | 'bush' | 'mushroom' | 'grass' | 'lake' | 'grain'
 
 interface ModelSource {
     kind: Kind
     url: string
 }
 
+// One coherent CC0 kit: Kenney's Nature Kit keeps the props consistent in
+// style, palette and scale. Only the flat tile centres receive decorations.
 const SOURCES: ModelSource[] = [
     { kind: 'tree', url: treeA },
     { kind: 'tree', url: treeB },
-    { kind: 'tree', url: treeC },
-    { kind: 'tree', url: treeD },
     { kind: 'rock', url: rockA },
     { kind: 'rock', url: rockB },
-    { kind: 'rock', url: rockC },
     { kind: 'bush', url: bushA },
     { kind: 'bush', url: bushB },
-    { kind: 'bush', url: plantA },
+    { kind: 'mushroom', url: mushroomA },
     { kind: 'grass', url: grassA },
 ]
+
+// Kenney's rocks ship with a warm brown base colour. A neutral grey keeps
+// them readable against the grass without looking like dirt clumps.
+function tintRocks(object: Object3D): void {
+    object.traverse(child => {
+        const mesh = child as Mesh
+        if (!mesh.isMesh || !mesh.material) return
+        const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
+        for (const material of materials) {
+            const standard = material as MeshStandardMaterial
+            if (standard.color) standard.color.set(0x9aa0a6)
+        }
+    })
+}
 
 // Scatters nature models over the terrain using shared InstancedMeshes per
 // chunk. Props stay hidden until the tile below them is revealed.
@@ -54,11 +67,15 @@ export default class Decoration {
     private templates: { kind: Kind, object: Object3D }[] = []
     // Parts of each template, relative to the template root.
     private prototypes = new Map<Object3D, Part[]>()
+    private floors = new Map<Object3D, number>()
     private loaded = false
     private seed = 1
 
     constructor(board: Board) {
         this.board = board
+        // Flat detail props are generated, so they are ready before the GLBs.
+        this.registerTemplate('lake', FieldDetails.lake())
+        this.registerTemplate('grain', FieldDetails.grain())
         this.loadModels()
     }
 
@@ -88,6 +105,7 @@ export default class Decoration {
                 gltf => {
                     const object = gltf.scene
                     prepareNatureModel(object)
+                    if (source.kind === 'rock') tintRocks(object)
                     this.registerTemplate(source.kind, object)
                     finish()
                 },
@@ -101,9 +119,10 @@ export default class Decoration {
     }
 
     private registerTemplate(kind: Kind, object: Object3D): void {
-        const parts = collectModelParts(object)
+        const parts = centerTemplate(collectModelParts(object))
         if (parts.length > 0) {
             this.prototypes.set(object, parts)
+            this.floors.set(object, templateFloor(parts))
             this.templates.push({ kind, object })
         }
     }
@@ -124,9 +143,12 @@ export default class Decoration {
         const collected = new Map<Object3D, { tile: Tile, position: Vector3, rotationY: number, scale: number }[]>()
 
         for (const tile of chunk.tiles) {
-            const count = 1 + Math.floor(rng() * 2)
+            // A tile with a lake or a grain patch gets just that one detail,
+            // so it never overlaps the random nature props.
+            const detail = this.fieldDetail(tile)
+            const count = detail ? 1 : 1 + Math.floor(rng() * 2)
             for (let i = 0; i < count; i++) {
-                const kind = this.pickKind(tile, rng)
+                const kind = detail ?? this.pickKind(tile, rng)
                 if (!kind) continue
 
                 const options = this.templatesOfKind(kind)
@@ -136,12 +158,33 @@ export default class Decoration {
                 if (!this.prototypes.has(template)) continue
 
                 const scale = this.scaleFor(kind, rng)
-                const rotationY = rng() * Math.PI * 2
+                const flatDetail = kind === 'lake' || kind === 'grain'
+                // Rectangular beds stay aligned with the tile grid; a random
+                // angle would push their corners onto the sloped border.
+                const rotationY = kind === 'grain'
+                    ? (rng() < 0.5 ? 0 : Math.PI / 2)
+                    : flatDetail ? 0 : rng() * Math.PI * 2
 
                 const offset = ts * 0.8
-                const px = tile.worldX + (rng() - 0.5) * offset
-                const pz = tile.worldZ + (rng() - 0.5) * offset
-                const py = this.board.terrain.heightAtWorld(px, pz) - 0.3
+                const jitterX = (rng() - 0.5) * offset
+                const jitterZ = (rng() - 0.5) * offset
+                // Centred templates plus a flat-centre placement keep wide
+                // props from spilling over the sloped edge of the tile.
+                const centred = kind === 'rock' || kind === 'lake' || kind === 'grain'
+                const rawX = centred ? tile.worldX : tile.worldX + jitterX
+                const rawZ = centred ? tile.worldZ : tile.worldZ + jitterZ
+                const flat = centred
+                    ? { x: tile.worldX, z: tile.worldZ }
+                    : this.board.terrain.clampToFlat(rawX, rawZ, scale * 0.25)
+                const px = flat.x
+                const pz = flat.z
+                const floor = this.floors.get(template) ?? 0
+                // Flat details must sit above the terrain, not under it: a
+                // buried patch vanished at some camera angles and distances.
+                // Nature props still sink by their template floor.
+                const py = flatDetail
+                    ? this.board.terrain.heightAtWorld(px, pz) + 0.08
+                    : this.board.terrain.heightAtWorld(px, pz) - floor * scale - 0.25
 
                 const list = collected.get(template)
                 // Positions are local to the chunk (the chunk group carries
@@ -199,23 +242,45 @@ export default class Decoration {
     private pickKind(tile: Tile, rng: () => number): Kind | null {
         const roll = rng()
         // Trees only on the higher ground.
-        if (roll < 0.12 && tile.surfaceY > 90) return 'tree'
-        if (roll < 0.4) return 'rock'
-        if (roll < 0.7) return 'bush'
+        if (roll < 0.1 && tile.surfaceY > 90) return 'tree'
+        if (roll < 0.34) return 'rock'
+        if (roll < 0.52) return 'bush'
+        if (roll < 0.62) return 'mushroom'
         return 'grass'
+    }
+
+    // Lakes and grain patches only appear on gently rolling, non-snowy tiles.
+    // The hash keeps the same tiles decorated after a chunk is rebuilt.
+    private fieldDetail(tile: Tile): Kind | null {
+        if (tile.surfaceY > 150) return null
+
+        const corners = tile.terrain.tileCorners(tile.x, tile.z)
+        const heights = [corners.a, corners.b, corners.c, corners.d]
+        if (Math.max(...heights) - Math.min(...heights) > 46) return null
+
+        const roll = hash2(tile.x, tile.z, this.seed ^ 0x5f3759df)
+        if (roll < 0.055) return 'lake'
+        if (roll < 0.15) return 'grain'
+        return null
     }
 
     private scaleFor(kind: Kind, rng: () => number): number {
         switch (kind) {
+            case 'lake':
+                return 0.75 + rng() * 0.15
+            case 'grain':
+                return 0.78 + rng() * 0.12
             case 'tree':
-                return 7 + rng() * 4
+                return 6 + rng() * 4
             case 'rock':
-                return 16 + rng() * 10
+                return 6 + rng() * 4
             case 'bush':
-                return 18 + rng() * 10
+                return 13 + rng() * 7
+            case 'mushroom':
+                return 9 + rng() * 5
             case 'grass':
             default:
-                return 9 + rng() * 7
+                return 8 + rng() * 5
         }
     }
 }

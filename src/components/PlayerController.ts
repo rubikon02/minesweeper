@@ -1,8 +1,12 @@
-import { Vector3, Scene } from 'three'
+import { Euler, Vector3, Scene } from 'three'
 import { PointerLockControls } from 'three/examples/jsm/controls/PointerLockControls.js'
 import type Game from './Game'
 import type Renderer from './Renderer'
 import type Player from './Player'
+
+const forwardAxis = new Vector3()
+const rightAxis = new Vector3()
+const yawEuler = new Euler(0, 0, 0, 'YXZ')
 
 export default class PlayerController {
     public game: Game
@@ -11,9 +15,11 @@ export default class PlayerController {
     public player: Player
     public controls: PointerLockControls
 
-    // Movement speeds: walking ~half speed, sprint moderately faster
-    public walkingSpeed = 1.3
-    public sprintingSpeed = 1.9
+    // World units per second. PointerLockControls.moveForward takes a
+    // per-frame distance, so movement used to change with the frame rate.
+    public walkingSpeed = 90
+    public sprintingSpeed = 140
+    public readonly maxStep = 6
 
     // Player height: raised so the player comfortably overlooks the tall mountains.
     public readonly walkHeight = 380
@@ -54,6 +60,9 @@ export default class PlayerController {
         this.savedWalkPos = { x: cx, z: cx }
         this.game.camera.position.set(cx, this.walkHeight, cx)
         this.aimAtNearbyGround(cx, cx)
+        // lookAt changes the quaternion; PointerLockControls reads the local
+        // matrix directly, so refresh it before the first movement step.
+        this.game.camera.updateMatrix()
     }
 
     // Point the camera at the ground a couple of tiles ahead. The camera sits
@@ -88,11 +97,13 @@ export default class PlayerController {
             const tz = centroid ? centroid.z : cam.position.z
             cam.position.set(tx, this.birdEyeHeight + this.heightOffset, tz + 220)
             cam.lookAt(new Vector3(tx, 0, tz))
+            cam.updateMatrix()
         } else {
             // Restore ground position with a proper downward pitch toward
             // the nearby walkable tiles.
             cam.position.set(this.savedWalkPos.x, this.walkHeight + this.heightOffset, this.savedWalkPos.z)
             this.aimAtNearbyGround(this.savedWalkPos.x, this.savedWalkPos.z)
+            cam.updateMatrix()
         }
     }
 
@@ -105,69 +116,92 @@ export default class PlayerController {
     public update(delta: number): void {
         if (!this.controls.isLocked) return
 
+        // A long frame after a tab switch must not teleport the player.
+        const stepTime = Math.min(Math.max(delta, 0), 0.05)
         const speed = (this.keys["ShiftLeft"] || this.keys["ShiftRight"])
             ? this.sprintingSpeed
             : this.walkingSpeed
 
         const cam = this.game.camera
-        const oldX = cam.position.x
-        const oldZ = cam.position.z
+        // PointerLockControls.moveForward/moveRight read camera.matrix, which
+        // the renderer only refreshes at the end of the frame. Derive the
+        // directions from the live quaternion so a fast mouse turn is not one
+        // frame behind the movement.
+        yawEuler.setFromQuaternion(cam.quaternion, 'YXZ')
+        forwardAxis.set(-Math.sin(yawEuler.y), 0, -Math.cos(yawEuler.y))
+        rightAxis.crossVectors(forwardAxis, cam.up).normalize()
 
-        if (this.keys["KeyW"] || this.keys["ArrowUp"]) {
-            this.controls.moveForward(speed)
+        let dx = 0
+        let dz = 0
+        const push = (axis: Vector3, amount: number): void => {
+            dx += axis.x * amount
+            dz += axis.z * amount
         }
-        if (this.keys["KeyS"] || this.keys["ArrowDown"]) {
-            this.controls.moveForward(-speed)
-        }
-        if (this.keys["KeyA"] || this.keys["ArrowLeft"]) {
-            this.controls.moveRight(-speed)
-        }
-        if (this.keys["KeyD"] || this.keys["ArrowRight"]) {
-            this.controls.moveRight(speed)
-        }
+        if (this.keys["KeyW"] || this.keys["ArrowUp"]) push(forwardAxis, speed * stepTime)
+        if (this.keys["KeyS"] || this.keys["ArrowDown"]) push(forwardAxis, -speed * stepTime)
+        if (this.keys["KeyD"] || this.keys["ArrowRight"]) push(rightAxis, speed * stepTime)
+        if (this.keys["KeyA"] || this.keys["ArrowLeft"]) push(rightAxis, -speed * stepTime)
 
-        // Keep the player near the uncovered area. Try the full move, then
-        // each axis on its own, so sliding along the edge still works.
-        // In bird's-eye mode the camera is free to move.
-        if (!this.isBirdEye) {
+        if (dx !== 0 || dz !== 0) {
             const board = this.game.board
-            const nx = cam.position.x
-            const nz = cam.position.z
-            if (!board.isWorldAccessible(nx, nz)) {
-                if (board.isWorldAccessible(nx, oldZ)) {
-                    cam.position.z = oldZ
-                } else if (board.isWorldAccessible(oldX, nz)) {
-                    cam.position.x = oldX
-                } else {
-                    cam.position.x = oldX
-                    cam.position.z = oldZ
+            const steps = Math.max(1, Math.ceil(Math.hypot(dx, dz) / this.maxStep))
+            const sx = dx / steps
+            const sz = dz / steps
+
+            // Clamp every small step separately and keep the last valid
+            // position. Rewinding to the start of the frame made the camera
+            // visibly jump back whenever a tile edge was crossed.
+            for (let i = 0; i < steps; i++) {
+                const nx = cam.position.x + sx
+                const nz = cam.position.z + sz
+                if (this.isBirdEye || board.isWorldAccessible(nx, nz)) {
+                    cam.position.x = nx
+                    cam.position.z = nz
+                    continue
                 }
+                if (this.isBirdEye || board.isWorldAccessible(nx, cam.position.z)) cam.position.x = nx
+                if (this.isBirdEye || board.isWorldAccessible(cam.position.x, nz)) cam.position.z = nz
             }
         }
 
-        // E raises the camera, Q lowers it. Clamp to a sane range.
+        // E raises the camera, Q lowers it. The floor follows the terrain so
+        // the camera can never end up underneath the map on a mountain.
         const raise = (this.keys["KeyE"] ? 1 : 0) - (this.keys["KeyQ"] ? 1 : 0)
-        this.heightOffset += raise * this.verticalSpeed * delta
+        this.heightOffset += raise * this.verticalSpeed * stepTime
         this.heightOffset = Math.max(-3000, Math.min(3000, this.heightOffset))
 
-        const baseHeight = (this.isBirdEye ? this.birdEyeHeight : this.walkHeight) + this.heightOffset
-        cam.position.y = Math.max(this.minCamHeight, Math.min(this.maxCamHeight, baseHeight))
+        const base = this.isBirdEye ? this.birdEyeHeight : this.walkHeight
+        const ground = this.game.board.terrain.heightAtWorld(cam.position.x, cam.position.z)
+        const floor = ground + (this.isBirdEye ? 120 : this.minCamHeight + 25)
+        let height = base + this.heightOffset
+        if (height < floor) {
+            height = floor
+            // Keep the manual offset in sync, otherwise Q keeps fighting the
+            // clamp and E appears to do nothing until the offset recovers.
+            this.heightOffset = height - base
+        }
+        cam.position.y = Math.min(this.maxCamHeight, height)
+        cam.updateMatrix()
 
         this.player.update(delta)
     }
 
     private addKeyListeners(): void {
         document.addEventListener("keydown", (e: KeyboardEvent) => {
+            // The settings overlay owns input while it is visible.
+            if (this.game.settingsPanel?.isOpen) {
+                this.keys[e.code] = false
+                return
+            }
+
             this.keys[e.code] = true
 
             if (e.code === "Space") {
                 e.preventDefault()
-                if (!e.repeat) {
-                    this.toggleBirdEye()
-                }
+                if (!e.repeat) this.toggleBirdEye()
             }
 
-            if (e.code === "KeyR") {
+            if (e.code === "KeyR" && !e.repeat) {
                 this.game.restart()
             }
 
@@ -182,7 +216,13 @@ export default class PlayerController {
 
         document.addEventListener("mousedown", (e: MouseEvent) => {
             const target = e.target as HTMLElement | null
+            // A focused button turns the next Space press into a click, which
+            // used to restart the run (and teleport the camera) mid-walk.
+            const button = target?.closest('button') as HTMLElement | null
+            if (button) button.blur()
             if (target && target.closest('#popup')) return
+            if (target && target.closest('#settings')) return
+            if (target && target.closest('#settingsBtn')) return
             if (target && target.closest('#floating-restart-btn')) return
 
             // After a loss, allow looking around the revealed map but keep

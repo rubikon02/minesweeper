@@ -106,6 +106,9 @@ export default class Flag {
             this.mesh = this.createFallbackMesh()
         }
         this.mesh.scale.setScalar(2)
+        // Restart clears every flag from the scene, even if a chunk was
+        // disposed while the OBJ was still loading.
+        this.mesh.userData.isFlag = true
         this.setPosition()
     }
 

@@ -86,6 +86,12 @@ export default class ChunkManager {
         }
     }
 
+    // Marker models load asynchronously; redraw the merged meshes when they
+    // arrive so a tile opened early does not keep the fallback geometry.
+    public rebuildMarkers(): void {
+        for (const chunk of this.chunks.values()) chunk.markMarkersDirty()
+    }
+
     public clear(): void {
         for (const chunk of this.chunks.values()) {
             chunk.dispose()

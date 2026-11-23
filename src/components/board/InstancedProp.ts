@@ -1,4 +1,5 @@
 import {
+    Box3,
     BufferGeometry,
     InstancedMesh,
     Material,
@@ -68,6 +69,8 @@ export default class DecoInstance {
 const dummy = new Object3D()
 const baseMatrix = new Matrix4()
 const finalMatrix = new Matrix4()
+const floorProbe = new Vector3()
+const boundsProbe = new Vector3()
 
 // Nature kit materials are fully metallic by default, which looks dark
 // without an environment map. Props and markers share the same fix.
@@ -91,6 +94,59 @@ export function prepareNatureModel(object: Object3D): void {
         mesh.castShadow = false
         mesh.receiveShadow = false
     })
+}
+
+// Lowest point of a template in root-local units. Nature kit pivots are not
+// consistently at the base, so sinking by a fixed amount leaves some props
+// floating while others disappear into the ground.
+export function templateFloor(parts: Part[]): number {
+    let lowest = Infinity
+
+    for (const part of parts) {
+        if (!part.geometry.boundingBox) part.geometry.computeBoundingBox()
+        const box = part.geometry.boundingBox
+        if (!box) continue
+
+        for (const x of [box.min.x, box.max.x]) {
+            for (const y of [box.min.y, box.max.y]) {
+                for (const z of [box.min.z, box.max.z]) {
+                    floorProbe.set(x, y, z).applyMatrix4(part.matrix)
+                    lowest = Math.min(lowest, floorProbe.y)
+                }
+            }
+        }
+    }
+
+    return Number.isFinite(lowest) ? lowest : 0
+}
+
+// Some kit models have their pivot off-centre. Without this correction a
+// "centred" rock still hangs over the sloped edge of its tile.
+export function centerTemplate(parts: Part[]): Part[] {
+    const bounds = new Box3()
+    for (const part of parts) {
+        if (!part.geometry.boundingBox) part.geometry.computeBoundingBox()
+        const box = part.geometry.boundingBox
+        if (!box) continue
+
+        for (const x of [box.min.x, box.max.x]) {
+            for (const y of [box.min.y, box.max.y]) {
+                for (const z of [box.min.z, box.max.z]) {
+                    boundsProbe.set(x, y, z).applyMatrix4(part.matrix)
+                    bounds.expandByPoint(boundsProbe)
+                }
+            }
+        }
+    }
+    if (bounds.isEmpty()) return parts
+
+    const center = bounds.getCenter(new Vector3())
+    const shift = new Matrix4().makeTranslation(-center.x, 0, -center.z)
+    return parts.map(part => ({
+        geometry: part.geometry,
+        material: part.material,
+        matrix: new Matrix4().multiplyMatrices(shift, part.matrix),
+    }))
 }
 
 // Flatten a loaded model into parts relative to its root, so one template

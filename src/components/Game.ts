@@ -16,6 +16,9 @@ import Board from './board/Board'
 import Player from './Player'
 import PlayerController from './PlayerController'
 import Session from './Session'
+import SettingsPanel from './SettingsPanel'
+import { cloneConfig, saveActiveConfig } from './board/markers/MarkerConfig'
+import type { MarkerConfig } from './board/markers/MarkerConfig'
 import type { SessionState, SessionView } from './Session'
 
 // Simple vertical gradient used as the sky backdrop.
@@ -47,12 +50,15 @@ export default class Game implements SessionView {
     public session!: Session
     public player!: Player
     public playerController!: PlayerController
+    public settingsPanel!: SettingsPanel
 
     constructor(container: HTMLElement) {
         this.container = container
         this.manager = new LoadingManager()
 
         this.createWorld()
+        this.settingsPanel = new SettingsPanel(this)
+        this.settingsPanel.openEditable()
         this.renderSession(this.session.getState(), 0)
         this.render()
     }
@@ -131,7 +137,7 @@ export default class Game implements SessionView {
             this.playerController.controls.unlock()
         }
 
-        this.showPopup("💥 GAME OVER", "You triggered a mine!", "#ef4444")
+        this.showPopup("GAME OVER", "You triggered a mine!", "#ef4444")
     }
 
     public showPopup(title: string, subtitle: string, accentColor: string): void {
@@ -187,6 +193,12 @@ export default class Game implements SessionView {
         viewMapBtn.onclick = () => this.closePopup()
         card.appendChild(viewMapBtn)
 
+        const settingsBtn = document.createElement("button")
+        settingsBtn.id = "popup-settings-btn"
+        settingsBtn.innerText = "Ustawienia i nowa gra"
+        settingsBtn.onclick = () => this.settingsPanel.openEditable()
+        card.appendChild(settingsBtn)
+
         popup.appendChild(card)
         document.body.appendChild(popup)
     }
@@ -206,6 +218,15 @@ export default class Game implements SessionView {
         button.innerText = "Play Again (R)"
         button.onclick = () => this.restart()
         document.body.appendChild(button)
+    }
+
+    // The only entry point that applies a marker arrangement. Chunks are
+    // cleared by restart(), so every rebuilt tile reads the new config.
+    public startWithConfig(config: MarkerConfig): void {
+        saveActiveConfig(config)
+        this.board.markerConfig = cloneConfig(config)
+        this.restart()
+        this.playerController.controls.lock()
     }
 
     public restart(): void {
